@@ -5,39 +5,15 @@
 
 import processing.serial.*;
 import processing.sound.*;
+import oscP5.*;
+import netP5.*;
 import java.util.ArrayList;
-
-class Osc {
-  float angle;
-  float speed;
-
-  Osc(float angle, float speed) {
-    this.angle = angle;
-    this.speed = speed;
-  }
-
-  float next() {
-    angle += speed;
-    return sin(angle);
-  }
-}
-
-class Split {
-  Osc osc;
-  float val;
-  int index;
-
-  Split(int index, float speed) {
-    this.index = index;
-    val = random(0.2, 0.8);
-    osc = new Osc(random(TWO_PI), speed);
-  }
-}
-
-int generation(int index) {
-  return floor(log(index + 1) / log(2));
-}
-
+import java.util.HashMap;
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.EncodeHintType;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.qrcode.QRCodeWriter;
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel;
 
 // Core board constants stay in the main tab so every system can read them.
 final int COLS = 28;
@@ -58,6 +34,7 @@ void settings() {
 
 void setup() {
   frameRate(60);
+  surface.setResizable(true);
   computeWin95Layout();
   loadPageBackground();
   loadMainWindowShape();
@@ -66,24 +43,8 @@ void setup() {
 
   loadMachineFont();
   loadHumanFont();
-
-  signalBeep = new SinOsc(this);
-  signalClick = new WhiteNoise(this);
-  signalEnv = new Env(this);
-
-  signalBeep.play();
-  signalClick.play();
-  signalBeep.amp(0);
-  signalClick.amp(0);
-
-  splits = new Split[round(pow(2, LINE_DEPTH)) - 1];
-
-  for (int i = 0; i < splits.length; i++) {
-    int gen = generation(i);
-    float speed = map(gen, 0, LINE_DEPTH, 0.001, 0.03);
-    if (i % 2 == 0) speed *= -1;
-    splits[i] = new Split(i, speed);
-  }
+  initOscBridge();
+  initMachineSound();
 
   for (int x = 0; x < COLS; x++) {
     for (int y = 0; y < ROWS; y++) {
@@ -95,6 +56,8 @@ void setup() {
   }
 
   perceptionBoundary = new PerceptionBoundary();
+  lastClearParticipantTime = millis();
+  unattendedTimeoutMs = int(random(UNATTENDED_TIMEOUT_MIN_MS, UNATTENDED_TIMEOUT_MAX_MS + 1));
   spawnData();
   lastFrameTime = millis();
   lastDropTime = millis();
@@ -167,12 +130,12 @@ void loadMachineFont() {
 }
 
 void useHumanFont(float size) {
-  if (humanFont != null) textFont(humanFont, size);
+  if (humanFont != null) textFont(humanFont, size * FONT_SCALE);
 }
 
 boolean useMachineFont(float size) {
   if (machineFont == null) return false;
-  textFont(machineFont, size);
+  textFont(machineFont, size * FONT_SCALE);
   return true;
 }
 
@@ -180,9 +143,17 @@ boolean useTerminalFont(float size) {
   return useMachineFont(size);
 }
 
+float ui(float value) {
+  return value * UI_SCALE;
+}
+
 void drawHeavyText(String value, float x, float y) {
   text(value, x, y);
-  text(value, x + 0.75, y);
+  text(value, x + ui(0.75), y);
+}
+
+void windowResized() {
+  computeWin95Layout();
 }
 
 void draw() {
@@ -202,49 +173,52 @@ void draw() {
   updateVoiceState();
   updateUltrasonicControl();
   updatePMSDObservationWindow();
+  updateParticipationMode();
   applyUltrasonicToActiveBlock();
-  updateMachineSelfRotation();
 
   updateTrace(dt);
-  updateDataTraceParticles(dt);
   updateConflictParticles(dt);
   updateBlockTrail(dt);
   updateSediment(dt);
   applySedimentGravity();
   updateFallingData(now);
+  updateMachineSound(dt);
   addBlockTrailFromActive(0.58);
   addTraceFromActive(0.52);
   updatePerceptionBoundary(dt);
-  updateLineField();
   updateLiveBinaryStream();
   updateMachineIndicator();
+  updateAutoQrArchive();
 
   drawPageBackground();
-  updateLifeDots(dt);
-  drawLifeDots();
   drawUI();
   drawWin95Frame();
 
-  clip(BOARD_X, BOARD_Y, BOARD_W, BOARD_H);
-  drawBoardGrid();
-  drawBlockTrail();
+  clip(BOARD_DISPLAY_X, BOARD_Y, BOARD_DISPLAY_W, BOARD_H);
+  pushMatrix();
+  translate(BOARD_DISPLAY_X, 0);
+  scale(BOARD_RENDER_SCALE_X, 1);
+  translate(-BOARD_X, 0);
+  drawLiquefiedBoardField();
   drawInferredFakeBlocks();
-  drawDataTraceParticles();
   drawConflictParticles();
   drawPerceptionBoundary();
 
   drawSediment();
   drawFallingData();
   drawActiveOuterOutline();
+  drawLRInputIndicators();
+  drawUnattendedModeNotice();
 
-  drawCRTOverlay();
+  sendOscToMax();
   noClip();
+  popMatrix();
 
   drawLiveBinaryStream();
   drawWin95Scrollbars();
   drawMachineIndicator();
-  drawRightLowerDrawnRegion();
   drawProjectTitleOverlay();
+  drawQrArchiveOverlay();
 }
 
 
@@ -255,4 +229,4 @@ void draw() {
 // MemoryBoundary.pde   trace memory, conflict signals, Machine Perception Boundary
 // SedimentSystem.pde   sediment storage, verification, decay, gravity
 // BlockDrawing.pde     sediment/active block drawing and inferred paths
-// LineFieldUtility.pde background line field helpers
+// QrArchive.pde        QR archive generation and display

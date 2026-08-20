@@ -5,9 +5,9 @@
 float[][] blockTrail = new float[COLS][ROWS];
 float[][] trace = new float[COLS][ROWS];
 int[][] traceBit = new int[COLS][ROWS];
-int lastDataTraceParticleFrame = -99999;
 int lastConflictParticleFrame = -99999;
-float binaryReadOffset = 0;
+int recentCorruptionCacheFrame = -99999;
+float recentCorruptionCache = 0;
 
 // ------------------------------------------------------------
 // TRACE / FIELD / DRAWING
@@ -33,26 +33,6 @@ void updateBlockTrail(float dt) {
   for (int x = 0; x < COLS; x++) {
     for (int y = 0; y < ROWS; y++) {
       blockTrail[x][y] = max(0, blockTrail[x][y] - fade);
-    }
-  }
-}
-
-void drawBlockTrail() {
-  rectMode(CORNER);
-  noStroke();
-
-  for (int x = 0; x < COLS; x++) {
-    for (int y = 0; y < ROWS; y++) {
-      if (blockTrail[x][y] <= 0.01) continue;
-      if (dataOccupies(x, y)) continue;
-
-      float px = BOARD_X + x * CELL;
-      float py = BOARD_Y + y * CELL;
-      float t = constrain(blockTrail[x][y], 0, 1);
-      float alpha = map(t, 0, 1, 0, 82);
-
-      fill(38, 92, 190, alpha * 0.75);
-      rect(px + 3, py + 3, CELL - 6, CELL - 6);
     }
   }
 }
@@ -88,13 +68,9 @@ void updateTrace(float dt) {
   }
 }
 
-void addDataTraceParticlesFromActive(float amount) {
-  // Data Samples remain in trace[][] as theoretical machine memory.
-  // The visible falling-block particle effect is intentionally disabled.
-}
-
 void addConflictFromActive(float amount) {
   if (active == null || accumulationFull) return;
+  if (active.lowConfidenceInference || unattendedMode) return;
   if (frameCount - lastConflictParticleFrame < 5 && random(1) < 0.74) return;
 
   int[][] cells = active.cells();
@@ -125,10 +101,6 @@ void addConflictAtCell(int gridX, int gridY, float amount) {
   }
 }
 
-void updateDataTraceParticles(float dt) {
-  dataTraceParticles.clear();
-}
-
 void updateConflictParticles(float dt) {
   for (int i = conflictParticles.size() - 1; i >= 0; i--) {
     ConflictParticle p = conflictParticles.get(i);
@@ -141,11 +113,8 @@ void updatePerceptionBoundary(float dt) {
   if (perceptionBoundary != null) perceptionBoundary.update(dt);
 }
 
-void drawDataTraceParticles() {
-  // Visible Data Sample dots are disabled; boundary logic still reads trace[][].
-}
-
 void drawConflictParticles() {
+  if (unattendedMode) return;
   for (int i = 0; i < conflictParticles.size(); i++) {
     conflictParticles.get(i).draw();
   }
@@ -153,12 +122,6 @@ void drawConflictParticles() {
 
 void drawPerceptionBoundary() {
   if (perceptionBoundary != null) perceptionBoundary.draw();
-}
-
-void trimDataTraceParticles() {
-  while (dataTraceParticles.size() > 180) {
-    dataTraceParticles.remove(0);
-  }
 }
 
 void updateLiveBinaryStream() {
@@ -172,9 +135,6 @@ void updateLiveBinaryStream() {
   if (liveBinaryStream.length() > maxChars) {
     liveBinaryStream = liveBinaryStream.substring(liveBinaryStream.length() - maxChars);
   }
-  if (frameCount % 48 == 0) {
-    lineFieldDirty = true;
-  }
   lastBinaryUpdateFrame = frameCount;
 }
 
@@ -185,29 +145,34 @@ String generateLiveBitChunk() {
   float corruption = recentCorruptionLevel();
   int shapeParity = abs(currentShapeName.hashCode()) % 2;
 
-  String chunk = "";
-  chunk += currentBinaryCode;
-  chunk += voiceDelta > voiceThreshold ? "1" : "0";
-  chunk += confidence > 0.50 ? "1" : "0";
-  chunk += machineValidation > 0.50 ? "1" : "0";
-  chunk += distance < 18 ? "1" : "0";
-  chunk += speaking ? "1" : "0";
-  chunk += accumulationFull ? "1" : "0";
-  chunk += soundRaw > voiceBaseline ? "1" : "0";
-  chunk += soundLevel > 0.35 ? "1" : "0";
-  chunk += misread > 0.40 ? "1" : "0";
-  chunk += corruption > 0.35 ? "1" : "0";
-  chunk += shapeParity == 1 ? "1" : "0";
-  return chunk;
+  StringBuilder chunk = new StringBuilder(18);
+  chunk.append(currentBinaryCode);
+  chunk.append(voiceDelta > voiceThreshold ? '1' : '0');
+  chunk.append(confidence > 0.50 ? '1' : '0');
+  chunk.append(machineValidation > 0.50 ? '1' : '0');
+  chunk.append(distance < 18 ? '1' : '0');
+  chunk.append(speaking ? '1' : '0');
+  chunk.append(accumulationFull ? '1' : '0');
+  chunk.append(soundRaw > voiceBaseline ? '1' : '0');
+  chunk.append(soundLevel > 0.35 ? '1' : '0');
+  chunk.append(misread > 0.40 ? '1' : '0');
+  chunk.append(corruption > 0.35 ? '1' : '0');
+  chunk.append(shapeParity == 1 ? '1' : '0');
+  return chunk.toString();
 }
 
 float recentCorruptionLevel() {
+  if (recentCorruptionCacheFrame == frameCount) return recentCorruptionCache;
+
   float strongest = 0;
   for (int x = 0; x < COLS; x++) {
     for (int y = 0; y < ROWS; y++) {
       if (sediment[x][y].occupied) strongest = max(strongest, sediment[x][y].corruption);
     }
   }
+
+  recentCorruptionCache = strongest;
+  recentCorruptionCacheFrame = frameCount;
   return strongest;
 }
 
@@ -226,7 +191,7 @@ int liveBinaryBitsPerRow() {
   float groupGap = BINARY_GROUP_GAP;
   int bits = 0;
   float usedW = 0;
-  float targetW = BINARY_W - 42;
+  float targetW = BINARY_W - ui(42);
 
   while (true) {
     float nextW = digitStep;
@@ -237,13 +202,6 @@ int liveBinaryBitsPerRow() {
   }
 
   return max(1, bits);
-}
-
-boolean binaryGlitchIndex(int index, int[] glitchIndices) {
-  for (int i = 0; i < glitchIndices.length; i++) {
-    if (index == glitchIndices[i]) return true;
-  }
-  return false;
 }
 
 void drawLiveBinaryStream() {
@@ -267,18 +225,18 @@ void drawBinaryTerminalPanel(boolean highRisk) {
   rectMode(CORNER);
   noStroke();
 
-  float terminalX = BINARY_X + 8;
+  float terminalX = BINARY_X + ui(8);
   useTerminalFont(BINARY_STREAM_FONT_SIZE);
-  drawTerminalHeader(terminalX, BINARY_Y + 10, highRisk);
+  drawTerminalHeader(terminalX, BINARY_Y + ui(10), highRisk);
 
   popStyle();
 }
 
 void drawComputationMonitor(boolean highRisk) {
   TerminalRow[] rows = computationRows();
-  float terminalX = BINARY_X + 8;
-  float rowY = BINARY_Y + 30;
-  clip(BINARY_X, BINARY_Y + 20, BINARY_W, BINARY_H - 20);
+  float terminalX = BINARY_X + ui(8);
+  float rowY = BINARY_Y + ui(30);
+  clip(BINARY_X, BINARY_Y + ui(20), BINARY_W, BINARY_H - ui(20));
   useTerminalFont(BINARY_STREAM_FONT_SIZE);
   textAlign(LEFT, TOP);
 
@@ -386,31 +344,6 @@ class TerminalRow {
   }
 }
 
-void drawTerminalFunctionKeys(boolean highRisk) {
-  float y = BINARY_Y + BINARY_H - 18;
-  noStroke();
-  fill(145, 198, 205, 235);
-  rect(BINARY_X + 3, y, BINARY_W - 6, 15);
-
-  String[] keys = {
-    "F1Help", "F2Setup", "F3Search", "F4Trace", "F5Tree",
-    "F6SortBy", "F7Nice-", "F8Nice+", "F9Kill", "F10Quit"
-  };
-
-  float x = BINARY_X + 8;
-  textAlign(LEFT, CENTER);
-  for (int i = 0; i < keys.length; i++) {
-    if (x > BINARY_X + BINARY_W - 70) break;
-    fill(30, 50, 54, 245);
-    text(keys[i], x, y + 8);
-    x += textWidth(keys[i]) + 14;
-    if (highRisk) stroke(110, 36, 38, 210);
-    else stroke(72, 116, 122, 190);
-    line(x - 7, y + 2, x - 7, y + 13);
-    noStroke();
-  }
-}
-
 TerminalRow[] computationRows() {
   float confidence = active == null ? input.confidence() : active.confidence;
   float misread = active == null ? input.conflict : active.misread;
@@ -454,18 +387,6 @@ TerminalRow[] computationRows() {
   return rows;
 }
 
-String terminalProcessRow(int pid, String user, int pri, int ni, int virt, int res, int shr, String state, float cpu, float mem, String command) {
-  return padLeft(str(pid), 5) + " " +
-    padRight(user, 8) +
-    padLeft(str(pri), 3) + " " +
-    padLeft(str(ni), 3) + " " +
-    state + " " +
-    padLeft(nf(constrain(cpu, 0, 99.9f), 1, 1), 5) + " " +
-    padLeft(nf(constrain(mem, 0, 99.9f), 1, 1), 5) + " " +
-    padRight(runtimeText(pid), 8) +
-    terminalFit(command, 58);
-}
-
 float sensorCpu() {
   float leftActivity = leftValid ? map(smoothUsL, ULTRASONIC_MAX_CM, ULTRASONIC_MIN_CM, 0, 1) : 0;
   float rightActivity = rightValid ? map(smoothUsR, ULTRASONIC_MAX_CM, ULTRASONIC_MIN_CM, 0, 1) : 0;
@@ -489,220 +410,8 @@ String runtimeText(int pid) {
   return minutes + ":" + nf(seconds, 2) + "." + nf(hundredths, 2);
 }
 
-String padLeft(String value, int width) {
-  String result = value;
-  while (result.length() < width) result = " " + result;
-  return result;
-}
-
-String padRight(String value, int width) {
-  String result = value;
-  while (result.length() < width) result += " ";
-  return result;
-}
-
-String terminalFit(String value, int maxChars) {
-  if (value.length() <= maxChars) return value;
-  if (maxChars <= 1) return value.substring(0, maxChars);
-  return value.substring(0, maxChars - 1) + ">";
-}
-
-void drawBinaryColorWash(boolean highRisk) {
-  pushStyle();
-  rectMode(CORNER);
-  noStroke();
-
-  int washCount = highRisk ? 14 : 8;
-  washCount += int(activityLevel * 8);
-
-  for (int i = 0; i < washCount; i++) {
-    float x = BINARY_X + random(BINARY_W);
-    float y = BINARY_Y - 6 + random(BINARY_H - 8);
-    float w = random(18, 96);
-    float h = random(7, 22);
-    float r = random(1);
-
-    if (r < 0.55) {
-      fill(210, 0, 0, random(18, highRisk ? 72 : 46));
-    } else if (r < 0.78) {
-      fill(32, 170, 84, random(12, 38));
-    } else {
-      fill(18, 18, 18, random(10, 32));
-    }
-
-    rect(x, y, w, h);
-  }
-
-  popStyle();
-}
-
-void drawBinaryFoldScratches(boolean highRisk) {
-  pushStyle();
-  strokeCap(SQUARE);
-  int scratchCount = highRisk ? 16 : 9;
-  scratchCount += int(activityLevel * 8);
-
-  for (int i = 0; i < scratchCount; i++) {
-    float y = BINARY_Y - 5 + random(BINARY_H - 10);
-    float x = BINARY_X + random(BINARY_W);
-    float length = random(22, 140);
-    float kink = random(-3.5, 3.5);
-    strokeWeight(random(0.5, 1.2));
-    if (random(1) < 0.72) stroke(210, 0, 0, random(28, 90));
-    else stroke(32, 170, 84, random(18, 54));
-    line(x, y, min(BINARY_X + BINARY_W, x + length), y + kink);
-  }
-
-  popStyle();
-}
-
-void drawBinaryStreamRow(
-  String rowStream,
-  int globalStartIndex,
-  float rowX,
-  float rowY,
-  float digitStep,
-  float groupGap,
-  boolean highRisk,
-  int[] glitchIndices,
-  int visibleLength
-) {
-  float x = rowX;
-  float rightEdge = BINARY_X + BINARY_W;
-
-  for (int i = 0; i < rowStream.length(); i++) {
-    int globalIndex = globalStartIndex + i;
-    int newness = visibleLength - globalIndex;
-    if (i > 0 && i % 4 == 0) x += groupGap;
-    if (x > rightEdge) break;
-
-    drawBinaryCharWithGlitch(
-      rowStream.charAt(i),
-      x,
-      rowY,
-      newness <= 6,
-      highRisk,
-      binaryGlitchIndex(globalIndex, glitchIndices)
-    );
-    x += digitStep;
-  }
-}
-
-void drawBinaryCharWithGlitch(char bit, float x, float y, boolean isNew, boolean highRisk, boolean glitch) {
-  char displayBit = bit;
-  float drawY = y;
-  color bitColor;
-  boolean randomFlip = random(1) < (highRisk ? 0.06 : 0.018) + activityLevel * 0.018;
-
-  if (randomFlip) {
-    displayBit = bit == '1' ? '0' : '1';
-    glitch = true;
-  }
-
-  if (glitch && random(1) < 0.18) {
-    bitColor = color(225, 190, 56, 220);
-  } else if (glitch && (highRisk || random(1) < 0.45)) {
-    bitColor = color(235, 58, 42, 235);
-  } else if (glitch && random(1) < 0.65) {
-    bitColor = color(95, 205, 118, 190);
-  } else if (isNew) {
-    bitColor = color(190, 255, 205, 235);
-  } else {
-    bitColor = color(42, 224, 112, 218);
-  }
-
-  if (glitch) {
-    drawY += random(-1.2, 1.4);
-    x += random(-0.8, 0.8);
-    if (random(1) < 0.11) displayBit = '_';
-  }
-  fill(bitColor);
-  text(displayBit, x, drawY);
-  text(displayBit, x + 0.65, drawY);
-
-  if (glitch && random(1) < 0.24) {
-    fill(80, 255, 140, 58);
-    text(displayBit, x + random(-2, 2), drawY + random(-2, 2));
-  }
-}
-
-void drawBodyField() {
-  // Intentionally quiet in the minimal interface.
-}
-
-float localDensity(int gx, int gy, int radius) {
-  float sum = 0;
-
-  for (int dx = -radius; dx <= radius; dx++) {
-    for (int dy = -radius; dy <= radius; dy++) {
-      int x = gx + dx;
-      int y = gy + dy;
-
-      if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
-      if (!sediment[x][y].occupied) continue;
-
-      float d = dist(gx, gy, x, y);
-      if (d <= radius) {
-        sum += map(d, 0, radius, 1.0, 0.05);
-      }
-    }
-  }
-
-  return constrain(sum / 4.8, 0, 1);
-}
-
-void drawProbabilityNoise() {
-  // Dense probabilistic texture removed for the minimal machine plane.
-}
-
 // ------------------------------------------------------------
 // MACHINE PERCEPTION BOUNDARY / DATA TRACE REGION
-
-class DataTraceParticle {
-  float x;
-  float y;
-  float vx;
-  float vy;
-  float life;
-  float maxLife;
-  float strength;
-  float size;
-
-  DataTraceParticle(float x, float y, float strength) {
-    this.x = x;
-    this.y = y;
-    this.strength = constrain(strength, 0.12, 1.0);
-    vx = random(-0.018, 0.018);
-    vy = random(-0.020, 0.012);
-    maxLife = random(1350, 2600);
-    life = maxLife;
-    size = random(2.0, 4.2);
-  }
-
-  void update(float dt) {
-    x += vx * dt;
-    y += vy * dt;
-    life -= dt;
-  }
-
-  void draw() {
-    float t = constrain(life / maxLife, 0, 1);
-    float alpha = map(t, 0, 1, 0, 155) * strength;
-
-    pushStyle();
-    rectMode(CENTER);
-    noStroke();
-    fill(38, 112, 230, alpha * 0.24);
-    rect(x, y, size + 4, size + 4);
-    fill(58, 138, 255, alpha);
-    rect(x, y, size, size);
-    popStyle();
-  }
-
-  boolean dead() {
-    return life <= 0;
-  }
-}
 
 class ConflictParticle {
   float x;
@@ -774,6 +483,8 @@ class PerceptionBoundary {
   float[][] targetOcc = new float[COLS][ROWS];
   float[][] displayOcc = new float[COLS][ROWS];
   float[][] sourceOcc = new float[COLS][ROWS];
+  float[][] expandedOcc = new float[COLS][ROWS];
+  float[][] adjustedOcc = new float[COLS][ROWS];
   float alpha = 0;
   float conflictMemory = 0;
   int trustedCellCount = 0;
@@ -849,16 +560,6 @@ class PerceptionBoundary {
 
     addActiveBoundarySource();
 
-    for (int i = 0; i < dataTraceParticles.size(); i++) {
-      DataTraceParticle p = dataTraceParticles.get(i);
-      if (p.life / p.maxLife < 0.28) continue;
-      int gx = int((p.x - BOARD_X) / CELL);
-      int gy = int((p.y - BOARD_Y) / CELL);
-      if (gx >= 0 && gx < COLS && gy >= 0 && gy < ROWS && !activeOccupies(gx, gy) && hasTrustedNeighbour(gx, gy, 3)) {
-        sourceOcc[gx][gy] = max(sourceOcc[gx][gy], 0.38);
-      }
-    }
-
     buildProbabilisticBodyTarget();
   }
 
@@ -921,11 +622,9 @@ class PerceptionBoundary {
     if (hasActiveBoundaryCells() && hasSediment) expansionPasses = max(expansionPasses, 4);
     if (conflictMemory > 0.45 && hasSediment) expansionPasses = min(5, expansionPasses + 1);
     for (int pass = 0; pass < expansionPasses; pass++) {
-      float[][] expanded = new float[COLS][ROWS];
-
       for (int x = 0; x < COLS; x++) {
         for (int y = 0; y < ROWS; y++) {
-          expanded[x][y] = targetOcc[x][y];
+          expandedOcc[x][y] = targetOcc[x][y];
         }
       }
 
@@ -933,20 +632,22 @@ class PerceptionBoundary {
         for (int y = 0; y < ROWS; y++) {
           if (targetOcc[x][y] <= 0.08) continue;
 
-          spreadTo(expanded, x - 1, y, targetOcc[x][y], pass);
-          spreadTo(expanded, x + 1, y, targetOcc[x][y], pass);
-          spreadTo(expanded, x, y - 1, targetOcc[x][y], pass);
-          spreadTo(expanded, x, y + 1, targetOcc[x][y], pass);
+          spreadTo(expandedOcc, x - 1, y, targetOcc[x][y], pass);
+          spreadTo(expandedOcc, x + 1, y, targetOcc[x][y], pass);
+          spreadTo(expandedOcc, x, y - 1, targetOcc[x][y], pass);
+          spreadTo(expandedOcc, x, y + 1, targetOcc[x][y], pass);
 
           if (!activeOnly && pass == 0 && stableChance(x, y, pass, 0.28)) {
             int dx = stableDirection(x, y, pass);
             int dy = stableDirection(y, x, pass + 3);
-            spreadTo(expanded, x + dx, y + dy, targetOcc[x][y] * 0.74, pass + 1);
+            spreadTo(expandedOcc, x + dx, y + dy, targetOcc[x][y] * 0.74, pass + 1);
           }
         }
       }
 
-      targetOcc = expanded;
+      float[][] swap = targetOcc;
+      targetOcc = expandedOcc;
+      expandedOcc = swap;
     }
 
     addMisreadBulge();
@@ -1045,10 +746,9 @@ class PerceptionBoundary {
     float growChance = map(sensorActivity, 0, 1, 0.05, 0.22);
     float retractChance = map(sensorActivity, 0, 1, 0.03, 0.13);
 
-    float[][] adjusted = new float[COLS][ROWS];
     for (int x = 0; x < COLS; x++) {
       for (int y = 0; y < ROWS; y++) {
-        adjusted[x][y] = targetOcc[x][y];
+        adjustedOcc[x][y] = targetOcc[x][y];
       }
     }
 
@@ -1067,19 +767,21 @@ class PerceptionBoundary {
         if (stableChance(x + phase, y, phase, growChance)) {
           int dx = stableDirection(x, y, phase);
           int dy = stableDirection(y, x, phase + 2);
-          spreadScan(adjusted, x + dx, y, targetOcc[x][y] * 0.42);
+          spreadScan(adjustedOcc, x + dx, y, targetOcc[x][y] * 0.42);
           if (stableChance(x, y + phase, phase + 4, 0.38)) {
-            spreadScan(adjusted, x, y + dy, targetOcc[x][y] * 0.36);
+            spreadScan(adjustedOcc, x, y + dy, targetOcc[x][y] * 0.36);
           }
         }
 
         if (sourceOcc[x][y] == 0 && stableChance(x, y + phase, phase + 8, retractChance)) {
-          adjusted[x][y] *= map(sensorActivity, 0, 1, 0.92, 0.72);
+          adjustedOcc[x][y] *= map(sensorActivity, 0, 1, 0.92, 0.72);
         }
       }
     }
 
-    targetOcc = adjusted;
+    float[][] swap = targetOcc;
+    targetOcc = adjustedOcc;
+    adjustedOcc = swap;
   }
 
   void spreadScan(float[][] adjusted, int x, int y, float value) {
@@ -1120,16 +822,16 @@ class PerceptionBoundary {
     float breakChance = 0;
 
     noFill();
-    stroke(125, 255, 170, alpha * 0.24);
-    strokeWeight(3.5);
+    stroke(0, 155, 88, alpha * 0.34);
+    strokeWeight(2.9);
     drawMaskEdges(jitter, breakChance * 0.38);
 
-    stroke(42, 118, 72, alpha * 0.70);
-    strokeWeight(2.0);
+    stroke(0, 255, 128, alpha * 0.96);
+    strokeWeight(1.85);
     drawMaskEdges(jitter * 0.44, breakChance * 0.68);
 
-    stroke(125, 255, 170, alpha);
-    strokeWeight(1.55);
+    stroke(175, 255, 205, alpha);
+    strokeWeight(1.05);
     drawMaskEdges(jitter, breakChance);
 
     popStyle();
@@ -1145,10 +847,6 @@ class PerceptionBoundary {
         drawEdgeIfOpen(x, y, 0, 1, jitter, breakChance);
       }
     }
-  }
-
-  void drawRegionFill() {
-    // Internal green occupancy squares are hidden; only the outer perception boundary is visible.
   }
 
   void drawEdgeIfOpen(int x, int y, int dx, int dy, float jitter, float breakChance) {
@@ -1175,13 +873,8 @@ class PerceptionBoundary {
     return displayOcc[x][y] > 0.16;
   }
 
-  boolean visibleRegionCell(int x, int y) {
-    if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return false;
-    return displayOcc[x][y] > 0.12;
-  }
 }
 
 // Custom typed memory and boundary state lives after its classes for Processing's preprocessor.
-ArrayList<DataTraceParticle> dataTraceParticles = new ArrayList<DataTraceParticle>();
 ArrayList<ConflictParticle> conflictParticles = new ArrayList<ConflictParticle>();
 PerceptionBoundary perceptionBoundary;

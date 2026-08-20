@@ -5,13 +5,25 @@
 int lastDropTime;
 int dropInterval = 500;
 boolean accumulationFull = false;
+boolean exhibitionAutoplayEnabled = true;
+int exhibitionRecycleCount = 0;
+final int PARTICIPANT_HISTORY_SIZE = 16;
+int[] participantShapeHistory = new int[PARTICIPANT_HISTORY_SIZE];
+int[] participantColumnHistory = new int[PARTICIPANT_HISTORY_SIZE];
+int participantHistoryCount = 0;
+int participantHistoryWrite = 0;
+
+boolean probabilisticFallRotationEnabled = true;
+final int PROB_ROTATION_MAX = 2;
+final int PROB_ROTATION_MIN_ROW_GAP = 2;
+final int PROB_ROTATION_TRIGGER_DISTANCE = 5;
+final float PROB_ROTATION_SCORE_THRESHOLD = 1.15;
 
 int currentPMSD = 0;
 String currentBinaryCode = "0000";
 String currentMachineInterpretation = "";
 String currentShapeName = "";
 
-final int PMSD_RECENT_MS = 1200;
 int lastPresenceTime = -99999;
 int lastSoundTime = -99999;
 int lastDistanceTime = -99999;
@@ -37,6 +49,11 @@ class InputState {
 }
 
 void keyPressed() {
+  if (key == 'u' || key == 'U') {
+    toggleArduinoSerialConnection();
+    return;
+  }
+
   if (key == 't' || key == 'T') {
     keyboardTestMode = !keyboardTestMode;
     if (keyboardTestMode) {
@@ -46,16 +63,51 @@ void keyPressed() {
     return;
   }
 
-  if (keyboardTestMode) {
-    handleKeyboardTestKeyPressed();
+  if (key == 'p' || key == 'P') {
+    generateCurrentQrArchive();
+    return;
   }
 
-  if (key == 'a' || key == 'A' || keyCode == LEFT) moveActive(-1);
-  if (key == 'd' || key == 'D' || keyCode == RIGHT) moveActive(1);
-  if (key == 'w' || key == 'W' || keyCode == UP) rotateActive();
-  if (key == 's' || key == 'S' || keyCode == DOWN) input.softDrop = true;
-  if (key == 'v' || key == 'V') resetVoiceCalibration();
+  if (key == 'i' || key == 'I') {
+    showLatestQrArchive();
+    return;
+  }
+  if (key == 'v' || key == 'V') {
+    sendArduinoCommand("STOP_SYSTEM");
+    return;
+  }
+  if (key == 'b' || key == 'B') {
+    resetVoiceCalibration();
+    return;
+  }
+  if (key == 'm' || key == 'M') {
+    machineAudioEnabled = !machineAudioEnabled;
+    if (!machineAudioEnabled) stopMachineAudio();
+    return;
+  }
+  if (key == 'c' || key == 'C') {
+    clearSediment();
+    return;
+  }
 
+  // Movement and simulated sensor input are available only in the
+  // keyboard fallback used when Arduino hardware is not connected.
+  if (!keyboardTestMode) return;
+  handleKeyboardTestKeyPressed();
+
+  if (key == 'a' || key == 'A' || keyCode == LEFT) {
+    notifyLRIndicator(-1);
+    moveActive(-1);
+  }
+  if (key == 'd' || key == 'D' || keyCode == RIGHT) {
+    notifyLRIndicator(1);
+    moveActive(1);
+  }
+  if (key == 'w' || key == 'W' || keyCode == UP) rotateActive();
+  if (key == 's' || key == 'S' || keyCode == DOWN) {
+    markClearParticipantEvidence();
+    input.softDrop = true;
+  }
   if (key == 'q' || key == 'Q') {
     if (keyboardTestMode) {
       testVoiceRaw = max(0, testVoiceRaw - 3);
@@ -86,24 +138,17 @@ void keyPressed() {
     else machineRaw = min(1000, machineRaw + 30);
   }
 
-  if (key == 'm' || key == 'M') {
-    machineAudioEnabled = !machineAudioEnabled;
-    if (!machineAudioEnabled) stopMachineAudio();
-  }
-
   if (key == ' ') {
     input.conflict = 1;
     active.misread = 1;
     addTraceFromActive(0.85);
     addConflictFromActive(0.90);
-    lineFieldDirty = true;
   }
 
-  if (key == 'c' || key == 'C') clearSediment();
 }
 
 void handleKeyboardTestKeyPressed() {
-  if (key == 'p' || key == 'P') {
+  if (key == 'r' || key == 'R') {
     testPresence = !testPresence;
     if (!testPresence) testDistance = false;
   }
@@ -192,10 +237,6 @@ int computePMSDCode() {
   int D = shapeDistanceNow() ? 1 : 0;
   if (P == 0) return 0;
   return P * 8 + M * 4 + S * 2 + D;
-}
-
-int recentBit(int lastSeenTime, int now) {
-  return now - lastSeenTime <= PMSD_RECENT_MS ? 1 : 0;
 }
 
 boolean shapePresenceNow() {
@@ -303,58 +344,6 @@ int[][] shapeFromPMSD(int code) {
   }
 }
 
-int interpretPMSDForShape(int rawCode) {
-  if (rawCode == 0) return 0;
-
-  float r = random(1);
-
-  switch (rawCode) {
-  case 8:
-    if (r < 0.65) return 8;
-    if (r < 0.82) return 9;
-    if (r < 0.94) return 10;
-    return 11;
-  case 9:
-    if (r < 0.60) return 9;
-    if (r < 0.78) return 8;
-    if (r < 0.90) return 11;
-    return 14;
-  case 10:
-    if (r < 0.60) return 10;
-    if (r < 0.78) return 8;
-    if (r < 0.90) return 11;
-    return 14;
-  case 11:
-    if (r < 0.55) return 11;
-    if (r < 0.70) return 9;
-    if (r < 0.85) return 10;
-    return 14;
-  case 12:
-    if (r < 0.55) return 12;
-    if (r < 0.70) return 13;
-    if (r < 0.85) return 14;
-    return 11;
-  case 13:
-    if (r < 0.55) return 13;
-    if (r < 0.70) return 12;
-    if (r < 0.85) return 14;
-    return 11;
-  case 14:
-    if (r < 0.50) return 14;
-    if (r < 0.68) return 11;
-    if (r < 0.84) return 12;
-    return 13;
-  case 15:
-    if (r < 0.45) return 15;
-    if (r < 0.62) return 14;
-    if (r < 0.77) return 11;
-    if (r < 0.89) return 12;
-    return 13;
-  }
-
-  return rawCode;
-}
-
 class FallingData {
   int binaryCode;
   int rawBinaryCode;
@@ -371,6 +360,11 @@ class FallingData {
   boolean humanConfirmed;
   boolean machineVerified;
   int lastHumanVoiceTime;
+  int probabilisticRotationsUsed;
+  int lastProbabilisticRotationRow;
+  boolean lowConfidenceInference;
+  int unattendedDriftCount;
+  int lastUnattendedDriftRow;
 
   FallingData(int rawCode) {
     this.rawBinaryCode = rawCode;
@@ -388,6 +382,11 @@ class FallingData {
     humanConfirmed = false;
     machineVerified = false;
     lastHumanVoiceTime = -99999;
+    probabilisticRotationsUsed = 0;
+    lastProbabilisticRotationRow = -99999;
+    lowConfidenceInference = false;
+    unattendedDriftCount = 0;
+    lastUnattendedDriftRow = -99999;
   }
 
   int[][] cells() {
@@ -413,12 +412,32 @@ class FallingData {
 }
 
 void spawnData() {
-  currentPMSD = computePMSDCode();
+  boolean inferredBirth = exhibitionAutoplayEnabled && unattendedMode;
+  currentPMSD = inferredBirth ? inferUnattendedPMSDCode() : computePMSDCode();
   currentBinaryCode = binary4(currentPMSD);
-  currentMachineInterpretation = interpretationFromPMSD(currentPMSD);
+  currentMachineInterpretation = inferredBirth
+    ? "LOW-CONFIDENCE ENVIRONMENTAL INFERENCE"
+    : interpretationFromPMSD(currentPMSD);
 
   active = new FallingData(currentPMSD);
+  active.lowConfidenceInference = inferredBirth;
+  if (inferredBirth) {
+    active.confidence = unattendedInferenceConfidence();
+    active.misread = constrain(0.18 + (1.0 - active.confidence) * 0.20, 0.18, 0.38);
+    active.voiceSolidity = constrain(0.10 + unattendedAmbientAudioLevel() * 0.12, 0.10, 0.24);
+  }
   currentShapeName = active.shapeName;
+
+  if (currentPMSD != 0 && active.cells().length > 0) {
+    boolean outletFound = placeActiveAtExhibitionOutlet();
+    if (!outletFound && exhibitionAutoplayEnabled) {
+      int recycleRows = chooseExhibitionRecycleRows();
+      recycleExhibitionRows(recycleRows);
+      outletFound = placeActiveAtExhibitionOutlet();
+      currentMachineInterpretation = "RECYCLE " + recycleRows + " ROWS";
+    }
+    accumulationFull = !outletFound;
+  }
 
   motionDetected = false;
   lastMotionTime = -99999;
@@ -427,22 +446,97 @@ void spawnData() {
 
   pendingMoveDirection = 0;
   pendingMoveSteps = 0;
+  lastUltrasonicStepRequestTime = -99999;
   ultrasonicX = active.column;
   input.horizontal = active.column / float(COLS - 1);
-  lineFieldDirty = true;
 
   if (currentPMSD == 0 || active.cells().length == 0) {
     return;
   }
 
-  if (!isValid(active.column, active.row, active.rotation)) {
-    accumulationFull = true;
+  if (!isValid(active.column, active.row, active.rotation)) accumulationFull = true;
+}
+
+int inferUnattendedPMSDCode() {
+  float audio = unattendedAmbientAudioLevel();
+  float radar = weakRadarEvidence();
+  boolean distanceEvidence = leftValid || rightValid ||
+    inShapeDistanceRange(usL) || inShapeDistanceRange(usR);
+
+  int environmentCode = 8;
+  if (radar > 0.10 || millis() - lastAmbientUltrasonicMotionTime < 4500) environmentCode |= 4;
+  if (audio > 0.12) environmentCode |= 2;
+  if (distanceEvidence) environmentCode |= 1;
+
+  // Historical participant data acts as a prior, while current weak sensor
+  // evidence can reassert individual M/S/D bits.
+  if (participantHistoryCount > 0 && random(1) < 0.46) {
+    int historyIndex = int(random(participantHistoryCount));
+    int historicalCode = participantShapeHistory[historyIndex];
+    int code = 8 | (historicalCode & 7);
+    if (radar > random(0.18, 0.72)) code |= 4;
+    if (audio > random(0.16, 0.70)) code |= 2;
+    if (distanceEvidence && random(1) < 0.72) code |= 1;
+    return constrain(code, 8, 15);
   }
+
+  return environmentCode;
+}
+
+float unattendedInferenceConfidence() {
+  float ultrasoundEvidence = (leftValid || rightValid || inShapeDistanceRange(usL) || inShapeDistanceRange(usR)) ? 1 : 0;
+  float evidence = unattendedAmbientAudioLevel() * 0.34 +
+    weakRadarEvidence() * 0.46 + ultrasoundEvidence * 0.20;
+  return constrain(0.08 + evidence * 0.20, 0.08, 0.28);
+}
+
+boolean placeActiveAtExhibitionOutlet() {
+  if (active == null || active.cells().length == 0) return false;
+  int[][] cells = active.cells();
+  int minOffsetX = 999;
+  int maxOffsetX = -999;
+  int minOffsetY = 999;
+  for (int i = 0; i < cells.length; i++) {
+    minOffsetX = min(minOffsetX, cells[i][0]);
+    maxOffsetX = max(maxOffsetX, cells[i][0]);
+    minOffsetY = min(minOffsetY, cells[i][1]);
+  }
+
+  int firstColumn = max(0, -minOffsetX);
+  int lastColumn = min(COLS - 1, COLS - 1 - maxOffsetX);
+  int candidateCount = lastColumn - firstColumn + 1;
+  if (candidateCount <= 0) return false;
+
+  int entryRow = max(active.row, -minOffsetY);
+  int[] validColumns = new int[candidateCount];
+  int validCount = 0;
+  for (int candidate = firstColumn; candidate <= lastColumn; candidate++) {
+    if (isValid(candidate, entryRow, active.rotation)) validColumns[validCount++] = candidate;
+  }
+  if (validCount == 0) return false;
+
+  // Participant and unattended blocks both use a uniform random legal outlet.
+  // Sensor/history data may influence an inferred shape, but not its spawn side.
+  active.column = validColumns[int(random(validCount))];
+  return true;
+}
+
+int chooseExhibitionRecycleRows() {
+  // Preserve the accumulated field: release only the minimum space needed.
+  // If one row is not enough, the next update will release one more row.
+  return 1;
 }
 
 void updateFallingData(int now) {
-  if (accumulationFull) return;
-
+  if (accumulationFull) {
+    if (exhibitionAutoplayEnabled) {
+      recycleExhibitionRows(chooseExhibitionRecycleRows());
+      accumulationFull = false;
+      spawnData();
+      lastDropTime = now;
+    }
+    return;
+  }
   if (active.cells().length == 0) {
     if (now - lastDropTime >= dropInterval) {
       spawnData();
@@ -451,10 +545,15 @@ void updateFallingData(int now) {
     return;
   }
 
-  active.confidence = lerp(active.confidence, input.confidence(), 0.035);
+  if (active.lowConfidenceInference) {
+    active.confidence = lerp(active.confidence, unattendedInferenceConfidence(), 0.020);
+  } else {
+    active.confidence = lerp(active.confidence, input.confidence(), 0.035);
+  }
   active.misread = max(input.conflict, active.misread * 0.985);
 
-  if (active.confidence < 0.22 && frameCount - lastConflictParticleFrame > 16 && random(1) < 0.025) {
+  if (!active.lowConfidenceInference && active.confidence < 0.22 &&
+      frameCount - lastConflictParticleFrame > 16 && random(1) < 0.025) {
     addConflictFromActive(map(active.confidence, 0.22, 0.05, 0.25, 0.75));
   }
 
@@ -465,8 +564,8 @@ void updateFallingData(int now) {
       addBlockTrailFromActive(0.74);
       addTraceFromActive(0.38);
       active.row++;
-      addDataTraceParticlesFromActive(0.44);
-      lineFieldDirty = true;
+      if (active.lowConfidenceInference) applyUnattendedInferenceDrift();
+      else maybeProbabilisticRotateActiveDuringFall();
     } else {
       depositActive();
       spawnData();
@@ -476,7 +575,41 @@ void updateFallingData(int now) {
   }
 }
 
+void applyUnattendedInferenceDrift() {
+  if (active == null || !active.lowConfidenceInference) return;
+  if (active.unattendedDriftCount >= 3) return;
+  if (active.row - active.lastUnattendedDriftRow < 3) return;
+
+  float audio = unattendedAmbientAudioLevel();
+  float radar = weakRadarEvidence();
+  float chance = constrain(0.08 + audio * 0.16 + radar * 0.18, 0.08, 0.32);
+  if (random(1) >= chance) return;
+
+  boolean changed = false;
+  if (random(1) < 0.56) {
+    int direction = random(1) < 0.5 ? -1 : 1;
+    if (isValid(active.column + direction, active.row, active.rotation)) {
+      active.column += direction;
+      changed = true;
+    }
+  } else if (active.probabilisticRotationsUsed < 2) {
+    int turn = random(1) < 0.5 ? 1 : 3;
+    int nextRotation = (active.rotation + turn) % 4;
+    if (tryRotateActiveTo(nextRotation, 0.30, 0.18)) {
+      active.probabilisticRotationsUsed++;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    active.unattendedDriftCount++;
+    active.lastUnattendedDriftRow = active.row;
+    currentMachineInterpretation = "WEAK SIGNAL / HYPOTHESIS DRIFT";
+  }
+}
+
 boolean moveActive(int direction) {
+  markClearParticipantEvidence();
   int nextColumn = active.column + direction;
 
   if (isValid(nextColumn, active.row, active.rotation)) {
@@ -486,10 +619,8 @@ boolean moveActive(int direction) {
     addBlockTrailFromActive(0.82);
     addTraceFromActive(0.28);
     active.column = nextColumn;
-    addDataTraceParticlesFromActive(0.62);
     ultrasonicX = active.column;
     input.horizontal = active.column / float(COLS - 1);
-    lineFieldDirty = true;
     return true;
   }
 
@@ -497,7 +628,183 @@ boolean moveActive(int direction) {
 }
 
 void rotateActive() {
+  markClearParticipantEvidence();
   int nextRotation = (active.rotation + 1) % 4;
+  tryRotateActiveTo(nextRotation, 0.78, 0.42);
+}
+
+void maybeProbabilisticRotateActiveDuringFall() {
+  if (!probabilisticFallRotationEnabled) return;
+  if (active == null || active.cells().length == 0) return;
+  if (active.row < 0) return;
+  if (active.probabilisticRotationsUsed >= PROB_ROTATION_MAX) return;
+  if (active.row - active.lastProbabilisticRotationRow < PROB_ROTATION_MIN_ROW_GAP) return;
+
+  int distance = landingDistanceForRotation(active.column, active.row, active.rotation);
+  if (distance > PROB_ROTATION_TRIGGER_DISTANCE) return;
+
+  int currentRotation = active.rotation;
+  float currentScore = rotationLandingScore(active.column, active.row, currentRotation);
+  float bestScore = currentScore;
+  float secondScore = -9999;
+  int bestRotation = currentRotation;
+  int secondRotation = currentRotation;
+  int bestColumn = active.column;
+  int bestRow = active.row;
+  int secondColumn = active.column;
+  int secondRow = active.row;
+
+  for (int r = 0; r < 4; r++) {
+    if (r == currentRotation) continue;
+    int[] fit = fittedRotationPlacement(r);
+    if (fit == null) continue;
+
+    float score = rotationLandingScore(fit[0], fit[1], r);
+    if (score > bestScore) {
+      secondScore = bestScore;
+      secondRotation = bestRotation;
+      secondColumn = bestColumn;
+      secondRow = bestRow;
+      bestScore = score;
+      bestRotation = r;
+      bestColumn = fit[0];
+      bestRow = fit[1];
+    } else if (score > secondScore) {
+      secondScore = score;
+      secondRotation = r;
+      secondColumn = fit[0];
+      secondRow = fit[1];
+    }
+  }
+
+  if (bestRotation == currentRotation) return;
+  if (bestScore - currentScore < PROB_ROTATION_SCORE_THRESHOLD) return;
+
+  float misreadChance = map(constrain(active.confidence, 0.05, 1.0), 0.05, 1.0, 0.20, 0.04);
+  int chosenRotation = bestRotation;
+  int chosenColumn = bestColumn;
+  int chosenRow = bestRow;
+  if (secondRotation != currentRotation && secondScore > currentScore && random(1) < misreadChance) {
+    chosenRotation = secondRotation;
+    chosenColumn = secondColumn;
+    chosenRow = secondRow;
+  }
+
+  currentMachineInterpretation = "HYPOTHESIS TEST";
+
+  if (applyRotationPlacement(chosenColumn, chosenRow, chosenRotation, 0.56, 0.26)) {
+    active.probabilisticRotationsUsed++;
+    active.lastProbabilisticRotationRow = active.row;
+  }
+}
+
+int[] fittedRotationPlacement(int nextRotation) {
+  int[] horizontalKick = {0, -1, 1, 0, 0};
+  int[] verticalKick = {0, 0, 0, -1, -2};
+
+  for (int i = 0; i < horizontalKick.length; i++) {
+    int testColumn = active.column + horizontalKick[i];
+    int testRow = active.row + verticalKick[i];
+    if (isValid(testColumn, testRow, nextRotation)) {
+      return new int[] {testColumn, testRow};
+    }
+  }
+
+  return null;
+}
+
+boolean applyRotationPlacement(int column, int row, int rotation, float trailStrength, float traceStrength) {
+  if (!isValid(column, row, rotation)) return false;
+
+  addBlockTrailFromActive(trailStrength);
+  addTraceFromActive(traceStrength);
+  active.column = column;
+  active.row = row;
+  active.rotation = rotation;
+  return true;
+}
+
+int landingDistanceForRotation(int column, int row, int rotation) {
+  int distance = 0;
+  while (isValid(column, row + distance + 1, rotation)) {
+    distance++;
+    if (distance > ROWS) break;
+  }
+  return distance;
+}
+
+float rotationLandingScore(int column, int row, int rotation) {
+  int landingRow = row + landingDistanceForRotation(column, row, rotation);
+  int previousRotation = active.rotation;
+  active.rotation = rotation;
+  int[][] cells = active.cells();
+  active.rotation = previousRotation;
+
+  int contact = 0;
+  int holes = 0;
+  int minY = ROWS;
+  int maxY = -ROWS;
+  boolean[] touchedColumns = new boolean[COLS];
+
+  for (int i = 0; i < cells.length; i++) {
+    int x = column + cells[i][0];
+    int y = landingRow + cells[i][1];
+    if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
+
+    minY = min(minY, y);
+    maxY = max(maxY, y);
+    touchedColumns[x] = true;
+
+    if (y + 1 >= ROWS || sediment[x][y + 1].occupied) contact += 3;
+    if (x > 0 && sediment[x - 1][y].occupied) contact++;
+    if (x < COLS - 1 && sediment[x + 1][y].occupied) contact++;
+
+    for (int scanY = y + 1; scanY < ROWS; scanY++) {
+      if (!sediment[x][scanY].occupied) {
+        holes++;
+        break;
+      }
+    }
+  }
+
+  int roughness = 0;
+  int previousHeight = -1;
+  for (int x = 0; x < COLS; x++) {
+    if (!touchedColumns[x]) continue;
+    int height = projectedColumnHeight(column, landingRow, rotation, x);
+    if (previousHeight >= 0) roughness += abs(height - previousHeight);
+    previousHeight = height;
+  }
+
+  float stabilityWeight = map(constrain(active.confidence, 0.05, 1.0), 0.05, 1.0, 0.8, 1.45);
+  float heightPenalty = max(0, ROWS - minY) * 0.025;
+  return contact * stabilityWeight - holes * 2.15 - roughness * 0.42 - heightPenalty - (maxY - minY) * 0.08;
+}
+
+int projectedColumnHeight(int column, int landingRow, int rotation, int targetX) {
+  int previousRotation = active.rotation;
+  active.rotation = rotation;
+  int[][] cells = active.cells();
+  active.rotation = previousRotation;
+
+  int topY = ROWS;
+  for (int y = 0; y < ROWS; y++) {
+    if (sediment[targetX][y].occupied) {
+      topY = y;
+      break;
+    }
+  }
+
+  for (int i = 0; i < cells.length; i++) {
+    int x = column + cells[i][0];
+    int y = landingRow + cells[i][1];
+    if (x == targetX && y >= 0 && y < ROWS) topY = min(topY, y);
+  }
+
+  return ROWS - topY;
+}
+
+boolean tryRotateActiveTo(int nextRotation, float trailStrength, float traceStrength) {
   int[] horizontalKick = {0, -1, 1, 0, 0};
   int[] verticalKick = {0, 0, 0, -1, -2};
 
@@ -506,16 +813,16 @@ void rotateActive() {
     int testRow = active.row + verticalKick[i];
 
     if (isValid(testColumn, testRow, nextRotation)) {
-      addBlockTrailFromActive(0.78);
-      addTraceFromActive(0.42);
+      addBlockTrailFromActive(trailStrength);
+      addTraceFromActive(traceStrength);
       active.column = testColumn;
       active.row = testRow;
       active.rotation = nextRotation;
-      addDataTraceParticlesFromActive(0.70);
-      lineFieldDirty = true;
-      return;
+      return true;
     }
   }
+
+  return false;
 }
 
 boolean isValid(int column, int row, int rotation) {
@@ -536,8 +843,19 @@ boolean isValid(int column, int row, int rotation) {
 }
 
 void depositActive() {
+  triggerOscDropBang();
+  triggerMachineDropClick();
+  notifyBlockDepositedForQr();
+
   int[][] cells = active.cells();
   int pieceId = nextSedimentPieceId++;
+
+  if (!active.lowConfidenceInference && active.interpretedShapeCode >= 8) {
+    participantShapeHistory[participantHistoryWrite] = active.interpretedShapeCode;
+    participantColumnHistory[participantHistoryWrite] = constrain(active.column, 0, COLS - 1);
+    participantHistoryWrite = (participantHistoryWrite + 1) % PARTICIPANT_HISTORY_SIZE;
+    participantHistoryCount = min(PARTICIPANT_HISTORY_SIZE, participantHistoryCount + 1);
+  }
 
   float storedConfidence = constrain(
     active.confidence - active.misread * random(0.15, 0.42),
@@ -560,20 +878,21 @@ void depositActive() {
 
     if (x >= 0 && x < COLS && y >= 0 && y < ROWS) {
       int landedBit = pmsdBitForCell(active, i, x, y);
-      sediment[x][y].store(storedConfidence, active.misread, storedSolidity, pieceId, active.machineVerified, active.interpretedShapeCode);
+      boolean storedMachineVerified = active.machineVerified && !active.lowConfidenceInference;
+      sediment[x][y].store(storedConfidence, active.misread, storedSolidity, pieceId, storedMachineVerified, active.interpretedShapeCode, active.rotation, active.lowConfidenceInference);
       trace[x][y] = max(trace[x][y], 0.95);
       traceBit[x][y] = landedBit;
-      if (active.misread > 0.42 || storedConfidence < 0.28) {
+      if (!active.lowConfidenceInference && (active.misread > 0.42 || storedConfidence < 0.28)) {
         addConflictAtCell(x, y, active.misread + (1.0 - storedConfidence) * 0.35);
       }
     }
   }
 
-  lineFieldDirty = true;
 }
 
 boolean humanVoiceConfirmedForLanding() {
   if (active == null) return false;
+  if (active.lowConfidenceInference) return false;
   boolean recentVoice = millis() - active.lastHumanVoiceTime <= VOICE_LANDING_MEMORY_MS;
   return active.humanConfirmed && recentVoice && active.voiceSolidity >= LANDED_CONFIRMED_SOLIDITY * 0.92;
 }

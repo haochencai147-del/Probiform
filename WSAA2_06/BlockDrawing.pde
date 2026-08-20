@@ -5,7 +5,8 @@
 // BLOCK DRAWING
 
 PImage[] binaryBlockImages = new PImage[16];
-PImage[] binaryBlockLightMasks = new PImage[16];
+final int BINARY_BLOCK_TONE_LEVELS = 18;
+PImage[][] binaryBlockToneImages = new PImage[16][BINARY_BLOCK_TONE_LEVELS];
 boolean[] binaryBlockAssetLoaded = new boolean[16];
 int[] binaryBlockTrimLeft = new int[16];
 int[] binaryBlockTrimTop = new int[16];
@@ -13,12 +14,8 @@ int[] binaryBlockTrimRight = new int[16];
 int[] binaryBlockTrimBottom = new int[16];
 final boolean USE_BINARY_BLOCK_ASSETS = true;
 final float BINARY_BLOCK_PIXELS_PER_CELL = 64.0;
-
-void loadBinaryBlockAssets() {
-  for (int code = 8; code <= 15; code++) {
-    loadBinaryBlockAsset(code);
-  }
-}
+final float BINARY_BLOCK_MAIN_VISUAL_SCALE = 1.55;
+final float BINARY_BLOCK_MAX_VISUAL_OVERFLOW = 1.55;
 
 void loadBinaryBlockAsset(int code) {
   if (code < 0 || code >= binaryBlockAssetLoaded.length) return;
@@ -29,27 +26,73 @@ void loadBinaryBlockAsset(int code) {
   if (binaryBlockImages[code] == null) {
     binaryBlockImages[code] = loadImage(name + ".png");
   }
-  buildBinaryBlockLightMask(code);
   computeBinaryBlockTrim(code);
 
   binaryBlockAssetLoaded[code] = true;
 }
 
-void buildBinaryBlockLightMask(int code) {
+PImage binaryBlockToneImage(int code, float solidityAmount) {
+  if (!hasBinaryBlockAsset(code)) return null;
+
+  int level = constrain(
+    round(constrain(solidityAmount, 0, 1) * (BINARY_BLOCK_TONE_LEVELS - 1)),
+    0,
+    BINARY_BLOCK_TONE_LEVELS - 1
+  );
+
+  if (binaryBlockToneImages[code][level] == null) {
+    buildBinaryBlockToneImage(code, level);
+  }
+
+  return binaryBlockToneImages[code][level];
+}
+
+void buildBinaryBlockToneImage(int code, int level) {
   PImage img = binaryBlockImages[code];
   if (img == null) return;
 
-  img.loadPixels();
-  PImage mask = createImage(img.width, img.height, ARGB);
-  mask.loadPixels();
+  float s = level / float(BINARY_BLOCK_TONE_LEVELS - 1);
+  PImage toned = createImage(img.width, img.height, ARGB);
 
+  img.loadPixels();
+  toned.loadPixels();
   for (int i = 0; i < img.pixels.length; i++) {
-    float a = alpha(img.pixels[i]);
-    mask.pixels[i] = a <= 4 ? color(255, 255, 255, 0) : color(255, 255, 255, a);
+    toned.pixels[i] = binaryBlockToneColor(img.pixels[i], s);
+  }
+  toned.updatePixels();
+
+  binaryBlockToneImages[code][level] = toned;
+}
+
+color binaryBlockToneColor(color source, float solidityAmount) {
+  float a = alpha(source);
+  if (a <= 4) return color(255, 255, 255, 0);
+
+  float r = red(source);
+  float g = green(source);
+  float b = blue(source);
+  float lum = r * 0.299 + g * 0.587 + b * 0.114;
+  float density = constrain(1.0 - lum / 255.0, 0, 1);
+  float s = constrain(pow(solidityAmount, 0.82), 0, 1);
+
+  boolean redPixel = r > 120 && r > g * 1.35 && r > b * 1.35;
+  boolean darkPixel = lum < 78 && !redPixel;
+
+  if (redPixel) {
+    float shade = map(density, 0.12, 0.82, 1.08, 0.82);
+    float nr = 255 * shade;
+    float ng = lerp(174, 16, s) * shade;
+    float nb = lerp(174, 10, s) * shade;
+    return color(constrain(nr, 0, 255), constrain(ng, 0, 255), constrain(nb, 0, 255), a);
   }
 
-  mask.updatePixels();
-  binaryBlockLightMasks[code] = mask;
+  if (darkPixel) {
+    float grey = lerp(118, 12, s) - density * 18;
+    return color(constrain(grey, 0, 255), constrain(grey, 0, 255), constrain(grey, 0, 255), a);
+  }
+
+  float grey = lerp(224, 76, s) - density * lerp(18, 34, s);
+  return color(constrain(grey, 0, 255), constrain(grey, 0, 255), constrain(grey, 0, 255), a);
 }
 
 void computeBinaryBlockTrim(int code) {
@@ -97,47 +140,38 @@ void drawBinaryBlockAsset(int code, float x, float y, float w, float h) {
 }
 
 void drawBinaryBlockAsset(int code, float x, float y, float w, float h, float solidityAmount) {
+  drawBinaryBlockAssetRotated(code, x + w * 0.5, y + h * 0.5, w, h, 0, solidityAmount);
+}
+
+void drawBinaryBlockAssetRotated(int code, float centerX, float centerY, float w, float h, int rotation, float solidityAmount) {
+  drawBinaryBlockAssetRotated(code, centerX, centerY, w, h, rotation, solidityAmount, 1.0);
+}
+
+void drawBinaryBlockAssetRotated(int code, float centerX, float centerY, float w, float h, int rotation, float solidityAmount, float opacityAmount) {
   if (!hasBinaryBlockAsset(code)) return;
 
   pushStyle();
-  imageMode(CORNER);
-  noTint();
+  pushMatrix();
+  translate(centerX, centerY);
+  rotate((rotation % 4) * HALF_PI);
+  imageMode(CENTER);
+  PImage img = binaryBlockToneImage(code, solidityAmount);
+  if (img == null) img = binaryBlockImages[code];
+  tint(255, 255 * constrain(opacityAmount, 0, 1));
 
   image(
-    binaryBlockImages[code],
-    x, y, w, h,
+    img,
+    0, 0, w, h,
     binaryBlockTrimLeft[code],
     binaryBlockTrimTop[code],
     binaryBlockTrimRight[code] + 1,
     binaryBlockTrimBottom[code] + 1
   );
 
-  float s = constrain(solidityAmount, 0, 1);
-  float lightenAlpha = map(s, 0, 1, 145, 0);
-  if (lightenAlpha > 1 && binaryBlockLightMasks[code] != null) {
-    tint(255, lightenAlpha);
-    image(
-      binaryBlockLightMasks[code],
-      x, y, w, h,
-      binaryBlockTrimLeft[code],
-      binaryBlockTrimTop[code],
-      binaryBlockTrimRight[code] + 1,
-      binaryBlockTrimBottom[code] + 1
-    );
-  }
   noTint();
 
+  popMatrix();
   popStyle();
-}
-
-float binaryBlockAssetAspect(int code) {
-  if (!hasBinaryBlockAsset(code)) return 1;
-  int trimW = binaryBlockTrimRight[code] - binaryBlockTrimLeft[code] + 1;
-  int trimH = binaryBlockTrimBottom[code] - binaryBlockTrimTop[code] + 1;
-  if (trimW > 0 && trimH > 0) {
-    return trimW / float(trimH);
-  }
-  return 1;
 }
 
 void drawFittedBinaryBlockAsset(int code, float x, float y, float maxW, float maxH) {
@@ -155,21 +189,37 @@ void drawFittedBinaryBlockAsset(int code, float x, float y, float maxW, float ma
 }
 
 void drawBinaryBlockAssetFitCellBox(int code, float x, float y, float boxW, float boxH) {
-  drawBinaryBlockAssetFitCellBox(code, x, y, boxW, boxH, 1.0);
+  drawBinaryBlockAssetFitCellBox(code, x, y, boxW, boxH, 1.0, 0);
 }
 
 void drawBinaryBlockAssetFitCellBox(int code, float x, float y, float boxW, float boxH, float solidityAmount) {
+  drawBinaryBlockAssetFitCellBox(code, x, y, boxW, boxH, solidityAmount, 0);
+}
+
+void drawBinaryBlockAssetFitCellBox(int code, float x, float y, float boxW, float boxH, float solidityAmount, int rotation) {
+  drawBinaryBlockAssetFitCellBox(code, x, y, boxW, boxH, solidityAmount, rotation, 1.0);
+}
+
+void drawBinaryBlockAssetFitCellBox(int code, float x, float y, float boxW, float boxH, float solidityAmount, int rotation, float opacityAmount) {
   if (!hasBinaryBlockAsset(code)) return;
 
   float sourceW = binaryBlockTrimRight[code] - binaryBlockTrimLeft[code] + 1;
   float sourceH = binaryBlockTrimBottom[code] - binaryBlockTrimTop[code] + 1;
   if (sourceW <= 0 || sourceH <= 0) return;
 
-  float scale = CELL / BINARY_BLOCK_PIXELS_PER_CELL;
+  boolean quarterTurn = abs(rotation % 2) == 1;
+  float rotatedSourceW = quarterTurn ? sourceH : sourceW;
+  float rotatedSourceH = quarterTurn ? sourceW : sourceH;
+  float scale = CELL / BINARY_BLOCK_PIXELS_PER_CELL * BINARY_BLOCK_MAIN_VISUAL_SCALE;
+  scale = min(scale, boxW / rotatedSourceW * BINARY_BLOCK_MAX_VISUAL_OVERFLOW);
+  scale = min(scale, boxH / rotatedSourceH * BINARY_BLOCK_MAX_VISUAL_OVERFLOW);
   float drawW = sourceW * scale;
   float drawH = sourceH * scale;
 
-  drawBinaryBlockAsset(code, x + (boxW - drawW) * 0.5, y + (boxH - drawH) * 0.5, drawW, drawH, solidityAmount);
+  clip(x, y, boxW, boxH);
+  drawBinaryBlockAssetRotated(code, x + boxW * 0.5, y + boxH * 0.5, drawW, drawH, rotation, solidityAmount, opacityAmount);
+  noClip();
+  clip(BOARD_X, BOARD_Y, BOARD_W, BOARD_H);
 }
 
 void drawSediment() {
@@ -178,12 +228,14 @@ void drawSediment() {
   for (int x = 0; x < COLS; x++) {
     for (int y = 0; y < ROWS; y++) {
       if (!sediment[x][y].occupied) continue;
+
       if (hasBinaryBlockAsset(sediment[x][y].visualCode)) {
         if (isFirstSedimentCellForPiece(sediment[x][y].pieceId, x, y)) {
           drawLandedBinaryBlockPiece(sediment[x][y].pieceId, sediment[x][y].visualCode);
         }
         continue;
       }
+
       drawLandedDataBlockCell(x, y, sediment[x][y]);
     }
   }
@@ -205,160 +257,6 @@ void drawFallingData() {
   }
 
   drawActiveConfidenceTag();
-}
-
-void drawRecognizedLandingOutline() {
-  if (accumulationFull || active == null) return;
-  int[][] cells = active.cells();
-  if (cells.length == 0) return;
-
-  int landingRow = active.row;
-  while (isValid(active.column, landingRow + 1, active.rotation)) {
-    landingRow++;
-  }
-
-  int minLocalX = 999;
-  int maxLocalX = -999;
-  int maxLocalY = -999;
-  for (int i = 0; i < cells.length; i++) {
-    minLocalX = min(minLocalX, cells[i][0]);
-    maxLocalX = max(maxLocalX, cells[i][0]);
-    maxLocalY = max(maxLocalY, cells[i][1]);
-  }
-
-  int bottomY = landingRow + maxLocalY;
-  int fieldTop = max(active.row + maxLocalY + 1, bottomY - 3);
-  int leftX = active.column + minLocalX - 2;
-  int rightX = active.column + maxLocalX + 2;
-
-  pushStyle();
-  noFill();
-  strokeCap(SQUARE);
-  strokeJoin(MITER);
-
-  boolean strongRecognition = active.machineVerified || activeWillContactNextStep();
-  float outerAlpha = strongRecognition ? 110 : 68;
-  float innerAlpha = strongRecognition ? 255 : 188;
-
-  stroke(0, 255, 80, outerAlpha);
-  strokeWeight(5.0);
-  drawRecognitionFieldOutline(leftX, rightX, fieldTop, bottomY);
-
-  stroke(0, 255, 96, innerAlpha);
-  strokeWeight(2.25);
-  drawRecognitionFieldOutline(leftX, rightX, fieldTop, bottomY);
-
-  popStyle();
-}
-
-void drawActiveRecognitionFrame() {
-  if (accumulationFull || active == null) return;
-  int[][] cells = active.cells();
-  if (cells.length == 0) return;
-
-  int minX = 999;
-  int minY = 999;
-  int maxX = -999;
-  int maxY = -999;
-
-  for (int i = 0; i < cells.length; i++) {
-    int x = active.column + cells[i][0];
-    int y = active.row + cells[i][1];
-    if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
-    minX = min(minX, x);
-    minY = min(minY, y);
-    maxX = max(maxX, x);
-    maxY = max(maxY, y);
-  }
-
-  if (maxX < minX || maxY < minY) return;
-
-  float x = BOARD_X + minX * CELL;
-  float y = BOARD_Y + max(0, minY - 3) * CELL;
-  float w = (maxX - minX + 1) * CELL;
-  float h = (minY - max(0, minY - 3)) * CELL;
-  if (h <= 0) return;
-  boolean strongRecognition = active.machineVerified || activeWillContactNextStep();
-
-  pushStyle();
-  rectMode(CORNER);
-  noFill();
-  strokeCap(SQUARE);
-  strokeJoin(MITER);
-
-  stroke(0, 255, 80, strongRecognition ? 96 : 64);
-  strokeWeight(5.0);
-  rect(x, y, w, h);
-
-  stroke(0, 255, 96, strongRecognition ? 255 : 210);
-  strokeWeight(2.1);
-  rect(x, y, w, h);
-
-  popStyle();
-}
-
-void drawRecognitionFieldOutline(int leftX, int rightX, int topY, int bottomY) {
-  leftX = constrain(leftX, 0, COLS - 1);
-  rightX = constrain(rightX, 0, COLS - 1);
-  topY = constrain(topY, 0, ROWS - 1);
-  bottomY = constrain(bottomY, 0, ROWS - 1);
-  if (rightX < leftX || bottomY < topY) return;
-
-  for (int y = topY; y <= bottomY; y++) {
-    float t = bottomY == topY ? 1 : (y - topY) / float(bottomY - topY);
-    int inset = round(lerp(2, 0, t));
-    int rowLeft = constrain(leftX + inset, 0, COLS - 1);
-    int rowRight = constrain(rightX - inset, 0, COLS - 1);
-    if (rowRight < rowLeft) continue;
-
-    float px = BOARD_X + rowLeft * CELL;
-    float py = BOARD_Y + y * CELL;
-    float pw = (rowRight - rowLeft + 1) * CELL;
-
-    if (y == topY) line(px, py, px + pw, py);
-    if (y == bottomY) line(px, py + CELL, px + pw, py + CELL);
-
-    int prevInset = y > topY ? round(lerp(2, 0, (y - 1 - topY) / float(max(1, bottomY - topY)))) : inset;
-    int nextInset = y < bottomY ? round(lerp(2, 0, (y + 1 - topY) / float(max(1, bottomY - topY)))) : inset;
-    if (y == topY || inset != prevInset) line(px, py, px, py + CELL);
-    else line(px, py, px, py + CELL);
-
-    float right = px + pw;
-    if (y == topY || inset != prevInset) line(right, py, right, py + CELL);
-    else line(right, py, right, py + CELL);
-
-    if (y < bottomY && nextInset != inset) {
-      float nextLeft = BOARD_X + constrain(leftX + nextInset, 0, COLS - 1) * CELL;
-      float nextRight = BOARD_X + (constrain(rightX - nextInset, 0, COLS - 1) + 1) * CELL;
-      line(min(px, nextLeft), py + CELL, max(px, nextLeft), py + CELL);
-      line(min(right, nextRight), py + CELL, max(right, nextRight), py + CELL);
-    }
-  }
-}
-
-void drawLandingOutlineEdges(int[][] cells, int landingRow) {
-  for (int i = 0; i < cells.length; i++) {
-    int x = active.column + cells[i][0];
-    int y = landingRow + cells[i][1];
-    if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
-
-    float left = BOARD_X + x * CELL;
-    float right = left + CELL;
-    float top = BOARD_Y + y * CELL;
-    float bottom = top + CELL;
-
-    if (!landingShapeOccupies(cells, x - active.column - 1, y - landingRow)) line(left, top, left, bottom);
-    if (!landingShapeOccupies(cells, x - active.column + 1, y - landingRow)) line(right, top, right, bottom);
-    if (!landingShapeOccupies(cells, x - active.column, y - landingRow - 1)) line(left, top, right, top);
-    if (!landingShapeOccupies(cells, x - active.column, y - landingRow + 1)) line(left, bottom, right, bottom);
-  }
-}
-
-boolean landingShapeOccupies(int[][] cells, int localX, int localY) {
-  for (int i = 0; i < cells.length; i++) {
-    if (cells[i][0] == localX && cells[i][1] == localY) return true;
-  }
-  return false;
 }
 
 boolean drawActiveBinaryBlockAsset() {
@@ -388,13 +286,16 @@ boolean drawActiveBinaryBlockAsset() {
   float w = max(1, maxX - minX + 1) * CELL;
   float h = max(1, maxY - minY + 1) * CELL;
   float solidityAmount = activeBinaryBlockSolidity();
-  drawBinaryBlockAssetFitCellBox(visualCode, x, y, w, h, solidityAmount);
+  float opacityAmount = active.lowConfidenceInference
+    ? map(constrain(active.confidence, 0.08, 0.28), 0.08, 0.28, 0.30, 0.58)
+    : 1.0;
+  drawBinaryBlockAssetFitCellBox(visualCode, x, y, w, h, solidityAmount, active.rotation, opacityAmount);
   drawActiveConfidenceTag(x, y, w, h);
   return true;
 }
 
 void drawActiveConfidenceTag() {
-  if (active == null || !active.machineVerified) return;
+  if (active == null || active.lowConfidenceInference || !active.machineVerified) return;
 
   int[][] cells = active.cells();
   if (cells.length == 0) return;
@@ -421,7 +322,7 @@ void drawActiveConfidenceTag() {
 }
 
 void drawActiveConfidenceTag(float x, float y, float w, float h) {
-  if (active == null || !active.machineVerified) return;
+  if (active == null || active.lowConfidenceInference || !active.machineVerified) return;
   if (!useMachineFont(20)) return;
 
   String label = "confidence";
@@ -448,6 +349,9 @@ float activeBinaryBlockSolidity() {
 
   float s = constrain(active.voiceSolidity, 0, 1);
   float solidityAmount = map(s, 0.10, LANDED_CONFIRMED_SOLIDITY, 0.18, 1.0);
+  if (arduinoActive && amplifiedVoiceDelta > 1.8) {
+    solidityAmount = max(solidityAmount, map(directMappedSolidity, 0.12, 1.0, 0.18, 1.0));
+  }
 
   if (speaking) {
     solidityAmount = max(solidityAmount, map(constrain(soundLevel, 0, 1), 0, 1, 0.45, 1.0));
@@ -457,6 +361,10 @@ float activeBinaryBlockSolidity() {
 
   if (active.misread > 0.48) {
     solidityAmount = map(active.misread, 0.48, 1, 0.55, 0.95);
+  }
+
+  if (active.lowConfidenceInference) {
+    solidityAmount = min(solidityAmount, map(active.confidence, 0.08, 0.28, 0.16, 0.34));
   }
 
   return constrain(solidityAmount, 0.12, 1);
@@ -478,7 +386,10 @@ void drawLandedBinaryBlockPiece(int pieceId, int visualCode) {
   int maxX = -1;
   int maxY = -1;
   float strongestSolidity = 0.10;
+  float strongestConfidence = 0.04;
   float strongestCorruption = 0;
+  int visualRotation = 0;
+  boolean inferredPiece = false;
 
   for (int x = 0; x < COLS; x++) {
     for (int y = 0; y < ROWS; y++) {
@@ -488,7 +399,10 @@ void drawLandedBinaryBlockPiece(int pieceId, int visualCode) {
       maxX = max(maxX, x);
       maxY = max(maxY, y);
       strongestSolidity = max(strongestSolidity, sediment[x][y].solidity);
+      strongestConfidence = max(strongestConfidence, sediment[x][y].confidence);
       strongestCorruption = max(strongestCorruption, sediment[x][y].corruption);
+      visualRotation = sediment[x][y].visualRotation;
+      inferredPiece = inferredPiece || sediment[x][y].lowConfidenceInference;
     }
   }
 
@@ -500,7 +414,10 @@ void drawLandedBinaryBlockPiece(int pieceId, int visualCode) {
   float h = max(1, maxY - minY + 1) * CELL;
   float solidityAmount = map(constrain(strongestSolidity, 0.10, 0.88), 0.10, 0.88, 0.18, 0.96);
   solidityAmount *= map(constrain(strongestCorruption, 0, 1), 0, 1, 1.0, 0.18);
-  drawBinaryBlockAssetFitCellBox(visualCode, x, y, w, h, solidityAmount);
+  float opacityAmount = inferredPiece
+    ? map(constrain(strongestConfidence, 0.04, 0.32), 0.04, 0.32, 0.28, 0.68)
+    : 1.0;
+  drawBinaryBlockAssetFitCellBox(visualCode, x, y, w, h, solidityAmount, visualRotation, opacityAmount);
 }
 
 void drawActiveDataBlockCell(int gridX, int gridY, float solidity, int bitValue) {
@@ -516,10 +433,13 @@ void drawActiveDataBlockCell(int gridX, int gridY, float solidity, int bitValue)
 
   rectMode(CORNER);
   noStroke();
+  float activeAlpha = active != null && active.lowConfidenceInference
+    ? map(active.confidence, 0.08, 0.28, 72, 145)
+    : 238;
   if (active != null && active.misread > 0.48) {
     fill(210, 30, 36, map(active.misread, 0.48, 1, 120, 230));
   } else {
-    fill(grey, grey, grey, 238);
+    fill(grey, grey, grey, activeAlpha);
   }
   rect(px + margin, py + margin, CELL - margin * 2, CELL - margin * 2);
 
@@ -534,7 +454,7 @@ void drawActiveDataBlockCell(int gridX, int gridY, float solidity, int bitValue)
     rect(px + 7, py + 7, CELL - 14, CELL - 14);
   }
 
-  drawBlockBinaryBit(bitValue, px, py, active != null && active.misread > 0.48 ? 46 : grey, 235);
+  drawBlockBinaryBit(bitValue, px, py, active != null && active.misread > 0.48 ? 46 : grey, activeAlpha);
 }
 
 void drawLandedDataBlockCell(int gridX, int gridY, DataCell cell) {
@@ -545,6 +465,10 @@ void drawLandedDataBlockCell(int gridX, int gridY, DataCell cell) {
   float grey = 32;
   float fadeAlpha = map(constrain(cell.corruption, 0, 1), 0, 1, 1.0, 0.08);
   float alpha = 220 * fadeAlpha;
+  float confidenceAlpha = cell.lowConfidenceInference
+    ? map(constrain(cell.confidence, 0.04, 0.32), 0.04, 0.32, 0.32, 0.72)
+    : 1.0;
+  alpha *= confidenceAlpha;
   float margin = 0.75;
 
   rectMode(CORNER);
@@ -560,10 +484,10 @@ void drawLandedDataBlockCell(int gridX, int gridY, DataCell cell) {
     fill(grey, grey, grey, alpha);
   } else if (s >= 0.35) {
     grey = map(s, 0.35, LANDED_CONFIRMED_SOLIDITY, 150, 78);
-    fill(grey, grey, grey, 205 * fadeAlpha);
+    fill(grey, grey, grey, 205 * fadeAlpha * confidenceAlpha);
   } else {
     grey = map(s, 0.10, 0.35, 232, 170);
-    fill(grey, grey, grey, 185 * fadeAlpha);
+    fill(grey, grey, grey, 185 * fadeAlpha * confidenceAlpha);
   }
 
   rect(px + margin, py + margin, CELL - margin * 2, CELL - margin * 2);
@@ -608,11 +532,29 @@ boolean activeOccupies(int gridX, int gridY) {
   return false;
 }
 
+boolean dataOccupies(int gridX, int gridY) {
+  if (gridX < 0 || gridX >= COLS || gridY < 0 || gridY >= ROWS) return false;
+  if (sediment[gridX][gridY].occupied) return true;
+
+  if (!accumulationFull && active != null) {
+    int[][] fallingCells = active.cells();
+    for (int i = 0; i < fallingCells.length; i++) {
+      int x = active.column + fallingCells[i][0];
+      int y = active.row + fallingCells[i][1];
+      if (x == gridX && y == gridY) return true;
+    }
+  }
+
+  return false;
+}
+
 void drawActiveOuterOutline() {
   if (accumulationFull) return;
   if (active != null && hasBinaryBlockAsset(active.interpretedShapeCode)) return;
 
-  float alpha = speaking ? 220 : 128;
+  float alpha = active != null && active.lowConfidenceInference
+    ? map(active.confidence, 0.08, 0.28, 45, 92)
+    : (speaking ? 220 : 128);
 
   if (active != null && active.misread > 0.40) {
     stroke(210, 30, 36, alpha);
@@ -651,7 +593,8 @@ void drawInferredFakeBlocks() {
   if (accumulationFull) return;
 
   int[][] movingCells = active.cells();
-  boolean recognitionActive = active != null && (active.machineVerified || activeWillContactNextStep());
+  boolean recognitionActive = active != null && !active.lowConfidenceInference &&
+    (active.machineVerified || activeWillContactNextStep());
 
   for (int i = 0; i < movingCells.length; i++) {
     int mx = active.column + movingCells[i][0];
@@ -746,30 +689,22 @@ void drawFakeCell(int gridX, int gridY, float alpha, float strength, boolean rec
   if (!useMachineFont(CELL * 0.42)) return;
 
   noStroke();
-  float bitAlpha = max(70, alpha * 1.7);
+  float bitAlpha = constrain(max(128, alpha * 2.35), 0, 235);
 
   if (recognitionActive) {
-    if (bit == 1) fill(0, 255, 80, bitAlpha * 0.96);
-    else fill(0, 160, 54, bitAlpha * 0.66);
+    fill(255, 255, 255, min(170, bitAlpha * 0.52));
+    text(bit, px + CELL * 0.5 + 0.8, py + CELL * 0.52 + 0.8);
+    if (bit == 1) fill(0, 255, 118, bitAlpha);
+    else fill(0, 205, 82, bitAlpha * 0.94);
   } else if (bit == 1) {
-    fill(38, 92, 190, bitAlpha * 0.52);
+    fill(255, 255, 255, min(150, bitAlpha * 0.45));
+    text(bit, px + CELL * 0.5 + 0.8, py + CELL * 0.52 + 0.8);
+    fill(30, 104, 205, bitAlpha * 0.92);
   } else {
-    fill(18, 18, 18, bitAlpha * 0.28);
+    fill(255, 255, 255, min(140, bitAlpha * 0.42));
+    text(bit, px + CELL * 0.5 + 0.8, py + CELL * 0.52 + 0.8);
+    fill(42, 42, 42, bitAlpha * 0.82);
   }
 
   text(bit, px + CELL * 0.5, py + CELL * 0.52);
-}
-
-void drawInferenceContour(int x1, int y1, int x2, int y2, float strength) {
-  float px1 = BOARD_X + (x1 + 0.5) * CELL;
-  float py1 = BOARD_Y + (y1 + 0.5) * CELL;
-  float px2 = BOARD_X + (x2 + 0.5) * CELL;
-  float py2 = BOARD_Y + (y2 + 0.5) * CELL;
-
-  noFill();
-  stroke(38, 92, 190, map(strength, 0, 1, 8, 42));
-  strokeWeight(map(strength, 0, 1, 0.25, 0.55));
-  strokeCap(SQUARE);
-
-  line(px1, py1, px2, py2);
 }

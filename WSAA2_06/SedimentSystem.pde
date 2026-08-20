@@ -3,11 +3,13 @@
 
 // Sediment system state.
 int lastGravityCollapseTime = 0;
-final int gravityCollapseInterval = 90;
+final int gravityCollapseInterval = 170;
 int lastGravityGapCheckTime = 0;
 boolean gravityDirty = false;
 int nextSedimentPieceId = 1;
 int corruptedCellsThisFrame = 0;
+final float UNATTENDED_SEDIMENT_GRACE_MS = 18000;
+final float UNATTENDED_SEDIMENT_DECAY_MULTIPLIER = 0.18;
 
 // ------------------------------------------------------------
 // SEDIMENT
@@ -20,12 +22,14 @@ class DataCell {
   float age = 0;
   float distortion = 0;
   int visualCode = 0;
+  int visualRotation = 0;
+  boolean lowConfidenceInference = false;
 
   float corruption = 0;
   boolean rejected = false;
   boolean machineVerified = false;
 
-  void store(float confidence, float distortion, float solidity, int pieceId, boolean machineVerified, int visualCode) {
+  void store(float confidence, float distortion, float solidity, int pieceId, boolean machineVerified, int visualCode, int visualRotation, boolean lowConfidenceInference) {
     occupied = true;
     this.pieceId = pieceId;
     this.confidence = confidence;
@@ -33,6 +37,8 @@ class DataCell {
     this.solidity = constrain(solidity, 0, 1);
     this.machineVerified = machineVerified;
     this.visualCode = visualCode;
+    this.visualRotation = visualRotation;
+    this.lowConfidenceInference = lowConfidenceInference;
     corruption = 0;
     rejected = false;
     age = 0;
@@ -49,17 +55,20 @@ class DataCell {
       return;
     }
 
-    if (solidity < LANDED_CONFIRMED_SOLIDITY && age > 2200) {
+    float decayStartAge = lowConfidenceInference ? UNATTENDED_SEDIMENT_GRACE_MS : 1900;
+    if (solidity < LANDED_CONFIRMED_SOLIDITY && age > decayStartAge) {
       float lowSolidityPressure = constrain(
         map(solidity, 0.10, LANDED_CONFIRMED_SOLIDITY, 1.0, 0.0),
         0,
         1
       );
-      float agePressure = constrain(map(age, 2200, 12000, 0.20, 1.0), 0.20, 1.0);
-      float decayRate = solidity < 0.35 ? 0.00020 : 0.000075;
+      float decayFullAge = lowConfidenceInference ? 65000 : 11000;
+      float agePressure = constrain(map(age, decayStartAge, decayFullAge, 0.22, 1.0), 0.22, 1.0);
+      float decayRate = solidity < 0.35 ? 0.00024 : 0.000090;
 
       if (machineVerified) decayRate *= 0.30;
       if (confidence > 0.55) decayRate *= 0.55;
+      if (lowConfidenceInference) decayRate *= UNATTENDED_SEDIMENT_DECAY_MULTIPLIER;
 
       increaseSedimentPieceCorruption(
         pieceId,
@@ -116,6 +125,13 @@ class DataCell {
     if (machineVerified) {
       decayChance *= 0.15;
     }
+    if (lowConfidenceInference) {
+      // Unattended inferences remain visible as accumulated machine memory.
+      // They still decay, but over an exhibition-scale duration rather than
+      // disappearing almost immediately after landing.
+      if (age < UNATTENDED_SEDIMENT_GRACE_MS) decayChance = 0;
+      else decayChance *= UNATTENDED_SEDIMENT_DECAY_MULTIPLIER;
+    }
 
     if (random(1) < decayChance) {
       float activePressure = max(noisePressure, latePressure * 0.70);
@@ -148,7 +164,6 @@ void updateSediment(float dt) {
         blockTrail[x][y] = 0;
         clearCell(sediment[x][y]);
         gravityDirty = true;
-        lineFieldDirty = true;
       }
     }
   }
@@ -198,7 +213,6 @@ void applySedimentGravity() {
   }
 
   lastGravityCollapseTime = millis();
-  lineFieldDirty = true;
 
   if (!movedAny) {
     gravityDirty = false;
@@ -252,7 +266,6 @@ void rejectSedimentPiece(int pieceId) {
   }
 
   gravityDirty = true;
-  lineFieldDirty = true;
 }
 
 boolean isSedimentPieceRepresentative(int pieceId, DataCell cell) {
@@ -355,6 +368,8 @@ void copyCell(DataCell sourceCell, DataCell targetCell) {
   targetCell.age = sourceCell.age;
   targetCell.distortion = sourceCell.distortion;
   targetCell.visualCode = sourceCell.visualCode;
+  targetCell.visualRotation = sourceCell.visualRotation;
+  targetCell.lowConfidenceInference = sourceCell.lowConfidenceInference;
   targetCell.corruption = sourceCell.corruption;
   targetCell.rejected = sourceCell.rejected;
   targetCell.machineVerified = sourceCell.machineVerified;
@@ -368,9 +383,50 @@ void clearCell(DataCell cell) {
   cell.age = 0;
   cell.distortion = 0;
   cell.visualCode = 0;
+  cell.visualRotation = 0;
+  cell.lowConfidenceInference = false;
   cell.corruption = 0;
   cell.rejected = false;
   cell.machineVerified = false;
+}
+
+void recycleExhibitionRows(int requestedRows) {
+  int rowsToClear = constrain(requestedRows, 1, ROWS - 1);
+  exhibitionRecycleCount++;
+
+  for (int y = ROWS - 1; y >= rowsToClear; y--) {
+    int sourceY = y - rowsToClear;
+    for (int x = 0; x < COLS; x++) {
+      copyCell(sediment[x][sourceY], sediment[x][y]);
+      trace[x][y] = trace[x][sourceY];
+      traceBit[x][y] = traceBit[x][sourceY];
+      blockTrail[x][y] = blockTrail[x][sourceY];
+      liquidMediumTrace[x][y] = liquidMediumTrace[x][sourceY];
+      liquidSlowTrace[x][y] = liquidSlowTrace[x][sourceY];
+      liquidBitTrace[x][y] = liquidBitTrace[x][sourceY];
+      liquidVisualTrace[x][y] = liquidVisualTrace[x][sourceY];
+      liquidCorruptionTrace[x][y] = liquidCorruptionTrace[x][sourceY];
+    }
+  }
+
+  for (int y = 0; y < rowsToClear; y++) {
+    for (int x = 0; x < COLS; x++) {
+      clearCell(sediment[x][y]);
+      trace[x][y] = 0;
+      traceBit[x][y] = 0;
+      blockTrail[x][y] = 0;
+      liquidMediumTrace[x][y] = 0;
+      liquidSlowTrace[x][y] = 0;
+      liquidBitTrace[x][y] = 0;
+      liquidVisualTrace[x][y] = 0;
+      liquidCorruptionTrace[x][y] = 0;
+    }
+  }
+
+  accumulationFull = false;
+  gravityDirty = false;
+  recentCorruptionCacheFrame = -99999;
+  println("Exhibition recycle: " + rowsToClear + " rows, cycle " + exhibitionRecycleCount);
 }
 
 void clearSediment() {
@@ -385,11 +441,9 @@ void clearSediment() {
 
   accumulationFull = false;
   gravityDirty = false;
-  dataTraceParticles.clear();
   conflictParticles.clear();
   if (perceptionBoundary != null) perceptionBoundary.reset();
   nextSedimentPieceId = 1;
-  lineFieldDirty = true;
   spawnData();
 }
 

@@ -7,7 +7,7 @@ final int SERIAL_BAUD_RATE = 115200;
 
 // Keyboard-only test mode. Set this to false when testing with Arduino again,
 // or press T while the sketch is running.
-boolean keyboardTestMode = true;
+boolean keyboardTestMode = false;
 boolean testPresence = true;
 boolean testDistance = true;
 float testUltrasonicCm = 17;
@@ -25,12 +25,41 @@ boolean arduinoActive = false;
 boolean ultrasonicDataPending = false;
 boolean ultrasonicTriggerArmed = true;
 
+// Exhibition participation state. Arduino activity only means that the sensor
+// system is running; it does not by itself prove that a visitor is present.
+boolean unattendedMode = false;
+boolean sensorSystemReadyWaiting = false;
+boolean sensorSystemRestartDetected = false;
+boolean sensorSystemHasBeenActive = false;
+int lastClearParticipantTime = 0;
+int unattendedTimeoutMs = 12000;
+final int UNATTENDED_TIMEOUT_MIN_MS = 10000;
+final int UNATTENDED_TIMEOUT_MAX_MS = 15000;
+final int PARTICIPANT_SENSOR_HOLD_MS = 1300;
+final float RADAR_PARTICIPANT_MIN_ENERGY = 48;
+final float RADAR_PARTICIPANT_MAX_DISTANCE_CM = 600;
+int lastAmbientUltrasonicMotionTime = -99999;
+float previousAmbientUsL = -1;
+float previousAmbientUsR = -1;
+
+int radarTargetState = 0;
+float radarMovingEnergy = 0;
+float radarStationaryEnergy = 0;
+float radarMovingDistance = 0;
+float radarStationaryDistance = 0;
+int lastRadarPacketTime = -99999;
+
 final float ULTRASONIC_MIN_CM = 5;
 final float ULTRASONIC_MAX_CM = 30;
 final float ULTRASONIC_DIRECTION_GAP_CM = 5;
+final int ULTRASONIC_PACKET_TIMEOUT_MS = 760;
 
 int lastMoveTime = 0;
 final int moveCooldown = 190;
+final int ultrasonicRepeatInterval = 260;
+int lastUltrasonicStepRequestTime = -99999;
+int lastUltrasonicPacketTime = -99999;
+int lastUltrasonicControlTime = -99999;
 int pendingMoveDirection = 0;
 int pendingMoveSteps = 0;
 
@@ -65,7 +94,9 @@ float voiceConfirm = 0;
 
 float voiceBaseline = 0;
 float voiceDelta = 0;
-float effectiveVoiceThreshold = 18;
+float amplifiedVoiceDelta = 0;
+float autoVoiceGain = 1.0;
+float autoVoicePeak = 1.0;
 int voiceCalibrationStartTime = -99999;
 final int VOICE_CALIBRATION_MS = 2600;
 
@@ -74,12 +105,8 @@ boolean externalVoiceCandidate = false;
 boolean voiceBaselineReady = false;
 
 int voiceThreshold = 17;
-float voiceActivationMargin = 3.5;
-int speakingFramesNeeded = 3;
-int silenceFramesNeeded = 18;
 
 int strongVoiceFramesNeeded = 2;
-int normalVoiceFramesNeeded = 4;
 float voiceCandidateThreshold = 4.5;
 float strongVoiceThreshold = 12.0;
 int voiceCandidateStartTime = -99999;
@@ -107,19 +134,10 @@ float machineLow = 40;
 float machineHigh = 320;
 
 boolean machineResponding = false;
-boolean selfNoiseOnly = false;
 
 float machineNoiseThreshold = 0.45;
 
-int lastMachineRotateTime = 0;
-final int machineRotateCooldown = 900;
-float machineRotatePressure = 0;
-
 // Machine audio synthesis.
-Env signalEnv;
-SinOsc signalBeep;
-WhiteNoise signalClick;
-
 boolean machineAudioEnabled = true;
 
 int lastBeepTime = 0;
@@ -129,6 +147,11 @@ int beepInterval = 260;
 // SERIAL INPUT
 
 void initArduinoSerial() {
+  if (arduinoPort != null) {
+    println("Arduino serial port is already connected.");
+    return;
+  }
+
   String[] ports = Serial.list();
 
   if (ports.length == 0) {
@@ -161,14 +184,73 @@ void initArduinoSerial() {
   }
 }
 
+void disconnectArduinoSerial() {
+  if (arduinoPort != null) {
+    try {
+      arduinoPort.stop();
+    }
+    catch (Exception e) {
+      println("Arduino serial close warning: " + e.getMessage());
+    }
+    arduinoPort = null;
+  }
+
+  arduinoActive = false;
+  sensorSystemReadyWaiting = false;
+  sensorSystemRestartDetected = false;
+  ultrasonicDataPending = false;
+  usL = -1;
+  usR = -1;
+  smoothUsL = -1;
+  smoothUsR = -1;
+  leftValid = false;
+  rightValid = false;
+  previousAmbientUsL = -1;
+  previousAmbientUsR = -1;
+  lastUltrasonicPacketTime = -99999;
+  lastAmbientUltrasonicMotionTime = -99999;
+  clearUltrasonicControlState();
+
+  radarTargetState = 0;
+  radarMovingEnergy = 0;
+  radarStationaryEnergy = 0;
+  radarMovingDistance = 0;
+  radarStationaryDistance = 0;
+  lastRadarPacketTime = -99999;
+
+  stopMachineAudio();
+  println("Arduino serial: DISCONNECTED");
+}
+
+void toggleArduinoSerialConnection() {
+  if (arduinoPort == null) {
+    println("Arduino serial: CONNECTING...");
+    initArduinoSerial();
+  } else {
+    disconnectArduinoSerial();
+  }
+}
+
 void readSerialData() {
   if (arduinoPort == null) return;
 
-  while (arduinoPort.available() > 0) {
+  int linesRead = 0;
+  while (arduinoPort.available() > 0 && linesRead < 24) {
     String line = arduinoPort.readStringUntil('\n');
     if (line == null) break;
     parseSerialLine(trim(line));
+    linesRead++;
   }
+}
+
+void sendArduinoCommand(String command) {
+  if (arduinoPort == null) {
+    println("Arduino command skipped, no serial port: " + command);
+    return;
+  }
+
+  arduinoPort.write(command + "\n");
+  println("Arduino command sent: " + command);
 }
 
 void updateKeyboardTestInput(float dt) {
@@ -193,6 +275,9 @@ void updateKeyboardTestInput(float dt) {
     ultrasonicDirection = "NONE";
     pendingMoveDirection = 0;
     pendingMoveSteps = 0;
+    lastUltrasonicStepRequestTime = -99999;
+    lastUltrasonicPacketTime = -99999;
+    lastUltrasonicControlTime = -99999;
   } else if (testDistance) {
     usL = testUltrasonicCm;
     usR = testUltrasonicCm;
@@ -219,6 +304,14 @@ void parseSerialLine(String line) {
 
   String upperLine = line.toUpperCase();
 
+  if (upperLine.indexOf("SENSOR SYSTEM READY") >= 0 ||
+      upperLine.indexOf("WAITING FOR HEART TOUCH TO START") >= 0) {
+    sensorSystemRestartDetected = sensorSystemHasBeenActive;
+    sensorSystemReadyWaiting = true;
+    arduinoActive = false;
+
+  }
+
   if (upperLine.indexOf("ACTIVE DATA") >= 0 ||
       upperLine.indexOf("MIC_") >= 0 ||
       upperLine.indexOf("US_L") >= 0 ||
@@ -239,6 +332,9 @@ void parseSerialLine(String line) {
     ultrasonicTriggerArmed = true;
     pendingMoveDirection = 0;
     pendingMoveSteps = 0;
+    lastUltrasonicStepRequestTime = -99999;
+    lastUltrasonicPacketTime = -99999;
+    lastUltrasonicControlTime = -99999;
     ultrasonicDirection = "NONE";
     lastPresenceTime = -99999;
     lastMotionTime = -99999;
@@ -246,10 +342,28 @@ void parseSerialLine(String line) {
     lastDistanceTime = -99999;
     previousMotionUsL = -1;
     previousMotionUsR = -1;
+    lastUltrasonicPacketTime = -99999;
+    lastUltrasonicControlTime = -99999;
   } else if (upperLine.indexOf("SYSTEM START") >= 0 ||
              upperLine.indexOf("ACTIVE DATA") >= 0) {
     arduinoActive = true;
+    sensorSystemHasBeenActive = true;
+    sensorSystemReadyWaiting = false;
+    sensorSystemRestartDetected = false;
     lastPresenceTime = millis();
+  }
+
+  String[] radarValues = match(
+    upperLine,
+    "LD_STATE\\s*:\\s*(\\d+)\\s+LD_MOVE\\s*:\\s*(\\d+)\\s+LD_STILL\\s*:\\s*(\\d+)\\s+LD_MDIST\\s*:\\s*(\\d+)\\s+LD_SDIST\\s*:\\s*(\\d+)"
+  );
+  if (radarValues != null) {
+    radarTargetState = int(radarValues[1]);
+    radarMovingEnergy = float(radarValues[2]);
+    radarStationaryEnergy = float(radarValues[3]);
+    radarMovingDistance = float(radarValues[4]);
+    radarStationaryDistance = float(radarValues[5]);
+    lastRadarPacketTime = millis();
   }
 
   String[] micBlValues = match(upperLine, "MIC_BL(?:\\s+KY038)?\\s*:?\\s*(-?\\d+(?:\\.\\d+)?)");
@@ -278,10 +392,26 @@ void parseSerialLine(String line) {
     "US_L:\\s*(-?\\d+(?:\\.\\d+)?)\\s*cm\\s+US_R:\\s*(-?\\d+(?:\\.\\d+)?)\\s*cm"
   );
 
+  if (values == null) {
+    String[] leftValue = match(line, "US_L\\s*:?\\s*(-?\\d+(?:\\.\\d+)?)");
+    String[] rightValue = match(line, "US_R\\s*:?\\s*(-?\\d+(?:\\.\\d+)?)");
+    if (leftValue != null || rightValue != null) {
+      values = new String[] {
+        "",
+        leftValue != null ? leftValue[1] : str(usL),
+        rightValue != null ? rightValue[1] : str(usR)
+      };
+    }
+  }
+
   if (values != null) {
     usL = float(values[1]);
     usR = float(values[2]);
     ultrasonicDataPending = true;
+    arduinoActive = true;
+    lastPresenceTime = millis();
+    lastDistanceTime = millis();
+    lastUltrasonicPacketTime = millis();
   }
 }
 
@@ -305,6 +435,9 @@ void updateVoiceState() {
   if (calibratingVoice) {
     voiceBaseline = lerp(voiceBaseline, soundRaw, 0.22);
     voiceDelta = 0;
+    amplifiedVoiceDelta = 0;
+    autoVoiceGain = lerp(autoVoiceGain, 1.0, 0.08);
+    autoVoicePeak = lerp(autoVoicePeak, 1.0, 0.08);
     soundLevel = lerp(soundLevel, 0, 0.35);
     voiceEnergy = soundLevel;
     voiceEnvelope = soundLevel;
@@ -322,8 +455,10 @@ void updateVoiceState() {
   }
 
   voiceDelta = max(0, soundRaw - voiceBaseline);
+  updateAutoVoiceGain(voiceDelta);
+  amplifiedVoiceDelta = voiceDelta * autoVoiceGain;
 
-  float targetSoundLevel = constrain(map(voiceDelta, voiceCandidateThreshold, 18, 0, 1), 0, 1);
+  float targetSoundLevel = constrain(map(amplifiedVoiceDelta, voiceCandidateThreshold, 18, 0, 1), 0, 1);
   if (targetSoundLevel > soundLevel) {
     soundLevel = lerp(soundLevel, targetSoundLevel, 0.38);
   } else {
@@ -333,9 +468,9 @@ void updateVoiceState() {
   voiceEnergy = soundLevel;
   voiceEnvelope = soundLevel;
 
-  boolean voiceCandidate = voiceDelta >= voiceCandidateThreshold;
-  boolean strongCandidate = voiceDelta >= strongVoiceThreshold && soundLevel > 0.20;
-  boolean releaseCandidate = voiceDelta < voiceCandidateThreshold * 0.55 || soundLevel < 0.04;
+  boolean voiceCandidate = amplifiedVoiceDelta >= voiceCandidateThreshold;
+  boolean strongCandidate = amplifiedVoiceDelta >= strongVoiceThreshold && soundLevel > 0.20;
+  boolean releaseCandidate = amplifiedVoiceDelta < voiceCandidateThreshold * 0.55 || soundLevel < 0.04;
 
   if (voiceCandidate) {
     if (sustainedVoiceCandidateStartTime < 0) sustainedVoiceCandidateStartTime = now;
@@ -348,15 +483,17 @@ void updateVoiceState() {
 
       voiceBaseline = lerp(voiceBaseline, soundRaw, learnRate);
       voiceDelta = max(0, soundRaw - voiceBaseline);
-      targetSoundLevel = constrain(map(voiceDelta, voiceCandidateThreshold, 18, 0, 1), 0, 1);
+      updateAutoVoiceGain(voiceDelta);
+      amplifiedVoiceDelta = voiceDelta * autoVoiceGain;
+      targetSoundLevel = constrain(map(amplifiedVoiceDelta, voiceCandidateThreshold, 18, 0, 1), 0, 1);
       soundLevel = lerp(soundLevel, targetSoundLevel, 0.28);
       voiceEnergy = soundLevel;
       voiceEnvelope = soundLevel;
-      voiceCandidate = voiceDelta >= voiceCandidateThreshold;
-      strongCandidate = voiceDelta >= strongVoiceThreshold && soundLevel > 0.20;
-      releaseCandidate = voiceDelta < voiceCandidateThreshold * 0.55 || soundLevel < 0.04;
+      voiceCandidate = amplifiedVoiceDelta >= voiceCandidateThreshold;
+      strongCandidate = amplifiedVoiceDelta >= strongVoiceThreshold && soundLevel > 0.20;
+      releaseCandidate = amplifiedVoiceDelta < voiceCandidateThreshold * 0.55 || soundLevel < 0.04;
 
-      if (sustainedVoiceMs > VOICE_BASELINE_FORCE_RELEASE_MS && voiceDelta < strongVoiceThreshold) {
+      if (sustainedVoiceMs > VOICE_BASELINE_FORCE_RELEASE_MS && amplifiedVoiceDelta < strongVoiceThreshold) {
         speaking = false;
         speakingFrameCount = 0;
         voiceCandidateStartTime = -99999;
@@ -370,7 +507,9 @@ void updateVoiceState() {
     float followRate = soundRaw < voiceBaseline ? 0.10 : 0.006;
     voiceBaseline = lerp(voiceBaseline, soundRaw, followRate);
     voiceDelta = max(0, soundRaw - voiceBaseline);
-    if (voiceDelta < voiceCandidateThreshold * 0.55) {
+    updateAutoVoiceGain(voiceDelta);
+    amplifiedVoiceDelta = voiceDelta * autoVoiceGain;
+    if (amplifiedVoiceDelta < voiceCandidateThreshold * 0.55) {
       soundLevel = lerp(soundLevel, 0, 0.35);
       voiceEnergy = soundLevel;
       voiceEnvelope = soundLevel;
@@ -386,7 +525,7 @@ void updateVoiceState() {
   } else if (releaseCandidate) {
     voiceCandidateStartTime = -99999;
     silenceFrameCount++;
-    if (voiceDelta < voiceCandidateThreshold * 0.45 ||
+    if (amplifiedVoiceDelta < voiceCandidateThreshold * 0.45 ||
         now - lastVoiceSignalTime >= VOICE_RELEASE_MS) {
       speaking = false;
       speakingFrameCount = 0;
@@ -405,7 +544,6 @@ void updateVoiceState() {
   }
 
   externalVoiceCandidate = voiceCandidate;
-  effectiveVoiceThreshold = voiceCandidateThreshold;
 
   if (voiceCandidate) {
     voicePeakHold = max(voicePeakHold, soundLevel);
@@ -413,7 +551,7 @@ void updateVoiceState() {
     voicePeakHold = max(0, voicePeakHold - 0.025);
   }
 
-  directMappedSolidity = solidityFromKYRaw(voiceDelta);
+  directMappedSolidity = solidityFromKYRaw(amplifiedVoiceDelta);
 
   updateActiveVoiceMemory(voiceCandidate, strongCandidate, now);
 
@@ -425,19 +563,40 @@ void updateVoiceState() {
 
   voiceHold = speaking ? soundLevel : 0;
   voiceConfirm = voiceHold;
+}
 
-  selfNoiseOnly = false;
+void updateAutoVoiceGain(float rawDelta) {
+  if (!arduinoActive) {
+    autoVoiceGain = lerp(autoVoiceGain, 1.0, 0.06);
+    autoVoicePeak = lerp(autoVoicePeak, 1.0, 0.06);
+    return;
+  }
+
+  autoVoicePeak = max(rawDelta, autoVoicePeak * 0.985);
+  float targetGain = constrain(12.0 / max(2.0, autoVoicePeak), 0.80, 5.50);
+  if (rawDelta < 0.65) targetGain = min(targetGain, 2.30);
+  autoVoiceGain = lerp(autoVoiceGain, targetGain, 0.045);
 }
 
 void updateActiveVoiceMemory(boolean voiceCandidate, boolean strongCandidate, int now) {
   if (active == null) return;
+
+  // Ambient audio may shape an unattended inference, but it must never
+  // promote an autonomous block into a human-confirmed/verified block.
+  if (active.lowConfidenceInference) {
+    active.humanConfirmed = false;
+    active.machineVerified = false;
+    active.lastHumanVoiceTime = -99999;
+    active.voiceSolidity = min(active.voiceSolidity, 0.24);
+    return;
+  }
 
   if ((speaking && voiceCandidate) || strongCandidate) {
     float voiceStrength = constrain(soundLevel, 0, 1);
     float confirmedSolidity = map(voiceStrength, 0, 1, 0.28, 0.78);
 
     if (strongCandidate) {
-      float strongAmount = constrain(map(voiceDelta, strongVoiceThreshold, 18, 0, 1), 0, 1);
+      float strongAmount = constrain(map(amplifiedVoiceDelta, strongVoiceThreshold, 18, 0, 1), 0, 1);
       confirmedSolidity = max(confirmedSolidity, map(strongAmount, 0, 1, LANDED_CONFIRMED_SOLIDITY, 0.86));
     }
 
@@ -472,9 +631,9 @@ void updateMachineFeedback() {
   targetMachineNoise = constrain(map(machineRaw, machineLow, machineHigh, 0, 1), 0, 1);
   machineNoiseLevel = lerp(machineNoiseLevel, targetMachineNoise, 0.08);
   machineResponding = machineNoiseLevel > machineNoiseThreshold;
-  selfNoiseOnly = false;
 
-  boolean activeHumanConfirmed = active != null && active.humanConfirmed;
+  boolean activeHumanConfirmed = active != null &&
+    !active.lowConfidenceInference && active.humanConfirmed;
 
   if (machineResponding && activeHumanConfirmed) {
     targetMachineValidation = machineNoiseLevel;
@@ -502,70 +661,13 @@ void updateMachineFeedback() {
     float freq = map(machineNoiseLevel, 0, 1, 220, 620);
     float amp = map(machineNoiseLevel, 0, 1, 0.006, 0.026);
 
-    signalBeep.freq(freq);
-    signalBeep.amp(amp);
-    signalEnv.play(signalBeep, 0.006, 0.05, amp * 0.5, 0.16);
-
-    signalClick.amp(amp * 0.04);
-    signalEnv.play(signalClick, 0.004, 0.018, amp * 0.04, 0.08);
-
     lastBeepTime = millis();
   }
 }
 
 void stopMachineAudio() {
-  if (signalBeep != null) signalBeep.amp(0);
-  if (signalClick != null) signalClick.amp(0);
-}
+  muteMachineSound();
 
-void updateMachineSelfRotation() {
-  if (accumulationFull) return;
-  if (active == null) return;
-  if (active.cells().length == 0) return;
-  if (!machineResponding) return;
-  if (active.humanConfirmed) return;
-  if (active.voiceSolidity >= LANDED_CONFIRMED_SOLIDITY) return;
-
-  if (millis() - lastMachineRotateTime < machineRotateCooldown) return;
-
-  float fillPressure = sedimentFillRatio();
-
-  float uncertainty =
-    (1.0 - active.confidence) * 0.35 +
-    active.misread * 0.30 +
-    machineNoiseLevel * 0.20 +
-    fillPressure * 0.15;
-
-  uncertainty = constrain(uncertainty, 0, 1);
-  if (active.humanConfirmed) uncertainty *= 0.45;
-  if (active.machineVerified) uncertainty *= 0.25;
-  machineRotatePressure = uncertainty;
-
-  float rotateChance = 0.002;
-
-  if (fillPressure > 0.35) {
-    rotateChance += map(fillPressure, 0.35, 0.85, 0.004, 0.030);
-  }
-
-  rotateChance += uncertainty * 0.025;
-
-  if (systemAge01 > 0.65) {
-    rotateChance *= 1.45;
-  }
-
-  if (random(1) < rotateChance) {
-    int oldRotation = active.rotation;
-
-    rotateActive();
-
-    if (active.rotation != oldRotation) {
-      active.misread = min(1.0, active.misread + 0.08);
-      addTraceFromActive(0.65);
-      addConflictFromActive(0.38);
-      lineFieldDirty = true;
-      lastMachineRotateTime = millis();
-    }
-  }
 }
 
 // ------------------------------------------------------------
@@ -583,8 +685,26 @@ void updateUltrasonicControl() {
     return;
   }
 
-  if (!ultrasonicDataPending) return;
+  if (!ultrasonicDataPending) {
+    if (millis() - lastUltrasonicPacketTime > ULTRASONIC_PACKET_TIMEOUT_MS) {
+      clearUltrasonicControlState();
+    }
+    return;
+  }
   ultrasonicDataPending = false;
+
+  if (usL >= ULTRASONIC_MIN_CM && usL <= ULTRASONIC_MAX_CM) {
+    if (previousAmbientUsL >= 0 && abs(usL - previousAmbientUsL) >= 2.4) {
+      lastAmbientUltrasonicMotionTime = millis();
+    }
+    previousAmbientUsL = usL;
+  }
+  if (usR >= ULTRASONIC_MIN_CM && usR <= ULTRASONIC_MAX_CM) {
+    if (previousAmbientUsR >= 0 && abs(usR - previousAmbientUsR) >= 2.4) {
+      lastAmbientUltrasonicMotionTime = millis();
+    }
+    previousAmbientUsR = usR;
+  }
 
   leftValid = usL >= ULTRASONIC_MIN_CM && usL <= ULTRASONIC_MAX_CM;
   rightValid = usR >= ULTRASONIC_MIN_CM && usR <= ULTRASONIC_MAX_CM;
@@ -622,17 +742,53 @@ void updateUltrasonicControl() {
   }
 
   if (ultrasonicDirection.equals("NONE")) {
-    ultrasonicTriggerArmed = true;
+    releaseUltrasonicMoveState();
   } else if (ultrasonicTriggerArmed && pendingMoveSteps == 0) {
     float controllingDistance = ultrasonicDirection.equals("LEFT") ? usL : usR;
 
     pendingMoveDirection = ultrasonicDirection.equals("LEFT") ? -1 : 1;
     pendingMoveSteps = distanceToMoveSteps(controllingDistance);
     ultrasonicTriggerArmed = false;
+    lastUltrasonicStepRequestTime = millis();
+    lastUltrasonicControlTime = millis();
+  } else if (pendingMoveSteps == 0 && millis() - lastUltrasonicStepRequestTime >= ultrasonicRepeatInterval) {
+    requestRepeatedUltrasonicMove();
   }
 }
 
+void clearUltrasonicControlState() {
+  leftValid = false;
+  rightValid = false;
+  smoothUsL = -1;
+  smoothUsR = -1;
+  ultrasonicDirection = "NONE";
+  releaseUltrasonicMoveState();
+}
+
+void releaseUltrasonicMoveState() {
+  ultrasonicTriggerArmed = true;
+  pendingMoveDirection = 0;
+  pendingMoveSteps = 0;
+}
+
+void requestRepeatedUltrasonicMove() {
+  if (!ultrasonicDirection.equals("LEFT") && !ultrasonicDirection.equals("RIGHT")) return;
+  if (pendingMoveSteps > 0) return;
+  if (millis() - lastUltrasonicStepRequestTime < ultrasonicRepeatInterval) return;
+
+  float controllingDistance = ultrasonicDirection.equals("LEFT") ? smoothUsL : smoothUsR;
+  if (controllingDistance < ULTRASONIC_MIN_CM || controllingDistance > ULTRASONIC_MAX_CM) return;
+
+  pendingMoveDirection = ultrasonicDirection.equals("LEFT") ? -1 : 1;
+  pendingMoveSteps = max(1, distanceToMoveSteps(controllingDistance));
+  lastUltrasonicStepRequestTime = millis();
+  lastUltrasonicControlTime = millis();
+}
+
 void applyUltrasonicToActiveBlock() {
+  // In unattended mode the readings influence the next birth position. They
+  // do not continuously steer a block as though a confirmed visitor existed.
+  if (unattendedMode) return;
   if (!arduinoActive || accumulationFull || pendingMoveSteps <= 0) return;
   if (millis() - lastMoveTime < moveCooldown) return;
 
@@ -656,9 +812,78 @@ int distanceToMoveSteps(float distanceCm) {
   return 1;
 }
 
-// ------------------------------------------------------------
-// DEBUG
+void markClearParticipantEvidence() {
+  lastClearParticipantTime = millis();
+  if (active != null && active.lowConfidenceInference) {
+    active.lowConfidenceInference = false;
+    active.confidence = max(active.confidence, 0.48);
+    active.misread = min(active.misread, 0.16);
+    currentMachineInterpretation = "PARTICIPANT CONFIRMED";
+  }
+  if (unattendedMode) {
+    unattendedMode = false;
+    unattendedTimeoutMs = int(random(UNATTENDED_TIMEOUT_MIN_MS, UNATTENDED_TIMEOUT_MAX_MS + 1));
+    println("Exhibition mode: PARTICIPANT");
+  }
+}
 
-void drawSensorDebug() {
-  drawHUD();
+boolean radarPacketFresh() {
+  return millis() - lastRadarPacketTime <= 1200;
+}
+
+boolean ultrasonicParticipantDetected() {
+  if (!arduinoActive) return false;
+  if (millis() - lastUltrasonicPacketTime > PARTICIPANT_SENSOR_HOLD_MS) return false;
+
+  boolean leftTarget = usL >= ULTRASONIC_MIN_CM && usL <= ULTRASONIC_MAX_CM;
+  boolean rightTarget = usR >= ULTRASONIC_MIN_CM && usR <= ULTRASONIC_MAX_CM;
+  return leftTarget || rightTarget;
+}
+
+boolean radarParticipantDetected() {
+  if (!radarPacketFresh() || radarTargetState == 0) return false;
+
+  boolean movingTarget = (radarTargetState == 1 || radarTargetState == 3) &&
+    radarMovingEnergy >= RADAR_PARTICIPANT_MIN_ENERGY &&
+    radarMovingDistance > 0 && radarMovingDistance <= RADAR_PARTICIPANT_MAX_DISTANCE_CM;
+  boolean stationaryTarget = (radarTargetState == 2 || radarTargetState == 3) &&
+    radarStationaryEnergy >= RADAR_PARTICIPANT_MIN_ENERGY &&
+    radarStationaryDistance > 0 && radarStationaryDistance <= RADAR_PARTICIPANT_MAX_DISTANCE_CM;
+
+  return movingTarget || stationaryTarget;
+}
+
+float weakRadarEvidence() {
+  if (!radarPacketFresh() || radarTargetState == 0) return 0;
+  return constrain(max(radarMovingEnergy, radarStationaryEnergy) / 100.0, 0, 1);
+}
+
+float unattendedAmbientAudioLevel() {
+  // Audio can shape autonomous inference, but it never proves that a visitor is present.
+  float voiceResidue = constrain(map(amplifiedVoiceDelta, 0.35, voiceCandidateThreshold, 0, 1), 0, 1);
+  float roomNoise = constrain(map(machineRaw, 4, machineLow, 0, 1), 0, 1);
+  return constrain(voiceResidue * 0.62 + roomNoise * 0.38, 0, 1);
+}
+
+void updateParticipationMode() {
+  if (keyboardTestMode && testPresence) {
+    markClearParticipantEvidence();
+    return;
+  }
+
+  // Only close-range ultrasonic evidence confirms an active participant.
+  // Radar remains available as weak environmental/inference input, but it
+  // must not keep the installation out of unattended mode because of distant
+  // visitors or persistent room reflections.
+  if (ultrasonicParticipantDetected()) {
+    markClearParticipantEvidence();
+    return;
+  }
+
+  int now = millis();
+  if (!unattendedMode && now - lastClearParticipantTime >= unattendedTimeoutMs) {
+    unattendedMode = true;
+    conflictParticles.clear();
+    println("Exhibition mode: LOW-CONFIDENCE UNATTENDED INFERENCE");
+  }
 }
