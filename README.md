@@ -1,12 +1,61 @@
-# Probiform Game
+# Probiform
 
 **Data Sedimentation — Constructing a Probabilistic Body**
 
-*Machine Inference and the Probabilistic Body* is an interactive installation that explores how machines construct representations of human presence from fragmented and incomplete information.
+![Final installation view of Probiform, showing the sculptural sensing apparatus, data displays, and main projection](IMG_2154.JPG)
 
-Instead, the system uses a low-resolution non-visual sensing network consisting of ultrasonic sensors, sound sensors, and millimeter-wave radar. These sensors can only detect partial signals such as distance, sound, and movement. Through continuous accumulation, interpretation, filtering, and misinterpretation of these signals, the system gradually constructs a machine-readable representation of human presence, which I describe as a Probabilistic Body.
+*Final installation view of Probiform.*
 
-Participants interact with the installation through movement and sound. Distance data influences the spatial behaviour of falling data blocks, while sound affects the machine’s confidence in the information it receives. The machine simultaneously listens to both human-generated sounds and sounds produced by its own electronic components, creating a feedback loop between human and machine perception.
+## Project Overview
+
+*Probiform* is an interactive installation that asks how a machine might infer a human presence without using a camera. A low-resolution sensing network of ultrasonic sensors, microphones, and millimetre-wave radar collects fragmented signals of distance, movement, sound, and proximity. None of these measurements describes a complete person. Instead, the system filters, combines, and sometimes misreads them to construct a temporary machine-readable representation: a **probabilistic body**.
+
+Participants alter the installation through movement and sound. Each sensor state is encoded as a four-bit PMSD value—Presence, Motion, Sound, and Distance—and translated into a custom Tetris-like data block. The blocks fall, rotate, collide, and accumulate over time. Tetris is therefore not used as a literal image of the body, but as a visual model of data sedimentation: isolated observations gradually become a structure that appears coherent while remaining partial, unstable, and open to error. The work makes machine inference visible as an ongoing act of construction rather than objective recognition.
+
+![Close-up of the Probiform sensing apparatus, including ultrasonic sensors, electronics, material structure, and display](DSCF7775.JPG)
+
+*Detail view of the sensing apparatus and its material construction.*
+
+## Concept and Research
+
+The project began with a concern about how computational systems turn incomplete observations into apparently complete identities. Machine perception often presents its classifications as facts, even though every result depends on sensor limits, thresholds, training assumptions, and interpretation. *Probiform* moves this process into an installation where uncertainty is not hidden. The machine never sees a participant as a whole; it can only assemble a **data body** from traces.
+
+The term **probabilistic body** describes this unstable representation. It is neither a portrait nor a digital copy of the participant. It is a changing hypothesis produced through machine perception: a body that becomes more or less plausible as signals accumulate, conflict, disappear, or are misread.
+
+The installation deliberately avoids cameras and facial recognition. A camera would introduce a detailed visual image and encourage identification, surveillance, and recognition of individual features. By using low-resolution, non-visual sensors, the work limits what the machine can know. This constraint shifts attention from who a person is to how a technical system claims that a person is present.
+
+### Research Questions
+
+The primary research question is:
+
+> How can a machine construct a representation of human presence from fragmented, non-visual sensor data, and how can an interactive installation reveal the uncertainty and misinterpretation within that process?
+
+Supporting questions include:
+
+- When does accumulated data begin to appear like a coherent body?
+- How do thresholds, confidence values, and sensor errors shape machine perception?
+- Can a data body remain legible while refusing photographic or biometric identification?
+- How can interaction expose inference as a process rather than present it as a neutral result?
+
+### Theoretical Context
+
+Vilém Flusser's writing on apparatuses and technical images provides a key reference for the project. His work treats technical images not simply as transparent records of reality, but as outputs shaped by programmed apparatuses. *Probiform* extends this concern beyond photography: its sensor readings, confidence values, and generated forms are also technical images produced by a system with defined limits and possibilities. The participant can act within this system, but the apparatus determines how those actions become data.
+
+Nick Couldry and Ulises A. Mejias's concept of **data colonialism** situates this transformation within a wider political economy. They argue that contemporary systems appropriate everyday human life as data for capitalist extraction. This perspective helps frame sensing in *Probiform* as more than a technical operation: converting presence into data is also an act of capture, classification, and power. The installation responds by exposing this conversion rather than presenting data collection as frictionless or neutral.
+
+N. Katherine Hayles's account of the **posthuman** challenges the idea that information can be separated cleanly from the material bodies that produce and carry it. This is central to the project's distinction between a living participant and a data body. The probabilistic body is not the participant made virtual; it is a partial computational construction whose apparent coherence depends on hardware, code, environmental conditions, and embodied action.
+
+Rafael Lozano-Hemmer's *Pulse Room* (2006) is an important artistic precedent for transforming biometric data into a physical and accumulated trace. In that installation, participants' heartbeats are recorded as pulses of light and move through a queue of hanging bulbs. *Probiform* shares this interest in making bodily data spatial, collective, and temporal, but replaces a single biometric measurement with an uncertain combination of non-visual sensor readings. Its accumulated forms therefore register not only presence, but also the machine's confidence, gaps, and misinterpretations.
+
+The project is informed particularly by:
+
+- Vilém Flusser, [*Towards a Philosophy of Photography*](https://reaktionbooks.co.uk/work/towards-a-philosophy-of-photography), Reaktion Books, 2000.
+- Vilém Flusser, [*Into the Universe of Technical Images*](https://www.upress.umn.edu/9780816670215/into-the-universe-of-technical-images/), University of Minnesota Press, 2011; first published in German in 1985.
+- Nick Couldry and Ulises A. Mejias, [*The Costs of Connection: How Data Is Colonizing Human Life and Appropriating It for Capitalism*](https://www.sup.org/books/title/?id=28816), Stanford University Press, 2019.
+- N. Katherine Hayles, [*How We Became Posthuman: Virtual Bodies in Cybernetics, Literature, and Informatics*](https://press.uchicago.edu/ucp/books/book/chicago/H/bo3769963.html), University of Chicago Press, 1999.
+- Rafael Lozano-Hemmer, [*Pulse Room*](https://www.lozano-hemmer.com/artworks/pulse_room.php), 2006, interactive installation with incandescent light bulbs, heart-rate sensors, a computer, and metal sculpture.
+
+## System Overview
 
 The project has two parts:
 
