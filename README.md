@@ -55,6 +55,74 @@ The project is informed particularly by:
 - N. Katherine Hayles, [*How We Became Posthuman: Virtual Bodies in Cybernetics, Literature, and Informatics*](https://press.uchicago.edu/ucp/books/book/chicago/H/bo3769963.html), University of Chicago Press, 1999.
 - Rafael Lozano-Hemmer, [*Pulse Room*](https://www.lozano-hemmer.com/artworks/pulse_room.php), 2006, interactive installation with incandescent light bulbs, heart-rate sensors, a computer, and metal sculpture.
 
+## How It Works
+
+The interaction follows a continuous inference loop:
+
+> **Presence detected → system activates → distance determines direction → sound confirms blocks → data accumulates → the machine constructs a body**
+
+```mermaid
+flowchart TD
+    A["Standby<br/>Waiting for heart touch or close-range ultrasonic wake"]
+    B["System activates<br/>Arduino begins streaming sensor data"]
+    C["Read fragmented signals<br/>Presence · Motion · Sound · Distance"]
+    D["Encode a four-bit PMSD state<br/>0000–1111"]
+    E["Select a custom data-block form"]
+    F["Ultrasonic side and distance<br/>Move the block left or right"]
+    G["Human voice confirmation<br/>Increase solidity and confidence"]
+    H["Block falls, may rotate, and collides<br/>with the existing data field"]
+    I["Deposit the block<br/>Store confidence, solidity, and misreading"]
+    J["Confirmed data persists<br/>Uncertain data may distort, decay, or disappear"]
+    K["Accumulated traces construct<br/>the probabilistic body"]
+    L{"No human activity<br/>for three minutes?"}
+
+    A --> B --> C --> D --> E --> H
+    C --> F --> H
+    C --> G --> H
+    H --> I --> J --> K --> L
+    L -- No --> C
+    L -- Yes --> A
+```
+
+### What Each Signal Does
+
+| Signal | Source | Effect in the system |
+| --- | --- | --- |
+| **Presence (P)** | Active sensor system and close-range participant evidence | Enables participant-driven data generation; without presence, the direct PMSD state is `0000` |
+| **Motion (M)** | Changes in ultrasonic distance and left/right movement | Sets the motion bit and contributes to the selected block form |
+| **Sound (S)** | Human voice detected above the calibrated room baseline | Sets the sound bit; a sustained recent voice can confirm a landing, raise confidence, and make the deposited block more solid |
+| **Distance (D)** | Left and right ultrasonic sensors | Sets the distance bit, chooses left/right control, and maps proximity to one, two, or three horizontal movement steps |
+
+### Using the Installation
+
+1. **Start the system.** Touch the MAX30102 heart-rate sensor, or approach closely enough for the ultrasonic wake detection to respond.
+2. **Move the data.** Stand on the left or right side of the sensing field. The corresponding ultrasonic sensor moves the active block in that direction; closer readings produce larger movements.
+3. **Confirm with sound.** Speak or make a sustained sound above the calibrated human-voice baseline. Voice confirmation increases the block's confidence and solidity when it lands.
+4. **Watch the inference accumulate.** Each PMSD combination generates a different form. Blocks fall, rotate, overlap, persist, distort, or decay according to the strength and consistency of the evidence.
+5. **Leave or continue.** Ongoing interaction repeats the sensing loop. After three minutes without human activity, the hardware returns to its waiting state; exhibition mode may continue producing visibly low-confidence environmental inferences.
+
+Without connected hardware, press `T` to enter keyboard test mode and use the controls documented below to simulate the same signal states.
+
+## Development Process
+
+### Visual and Interaction Iterations
+
+**Documentation date:** 2 August 2026
+
+**Stages represented:** sensor experiments, Tetris prototype, machine misreading, and interface development
+
+![Development collage showing sensor tests, early Tetris prototypes, interface experiments, and later Probiform visual states](development-process-collage.png)
+
+*Development collage documenting the movement from separate sensor and Tetris experiments toward the integrated Probiform interface.*
+
+**What I did:** The collage brings together an early breadboard sensor test, initial white Processing interfaces, custom binary Tetris forms, Windows 95-inspired frames, red conflict indicators, and experiments with the smaller reconstructed-body window. These tests gradually connected the physical sensing system to a visual language of data accumulation.
+
+**Problem:** In the early prototypes, sensor values, falling blocks, and machine interpretation appeared as separate technical outputs. The interface showed that data was being collected, but it did not yet communicate the difference between confirmed evidence, uncertain inference, and machine misreading.
+
+**How I changed it:** I introduced a clearer visual hierarchy and used different visual states to express confidence. Grey and black forms indicate degrees of confirmation and solidity, while red elements expose conflict, corruption, and contradictory input. The interface developed from a mostly white functional prototype into a Windows 95-inspired system with dedicated data panels, a machine-perception boundary, and a smaller liquefaction view that reconstructs accumulated traces rather than displaying a literal body.
+
+This image records several stages together. Individual stage dates should be added when the original sketches, screenshots, or photographs can be matched to their source files.
+
 ## System Overview
 
 The project has two parts:
