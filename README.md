@@ -47,14 +47,6 @@ N. Katherine Hayles's account of the **posthuman** challenges the idea that info
 
 Rafael Lozano-Hemmer's *Pulse Room* (2006) is an important artistic precedent for transforming biometric data into a physical and accumulated trace. In that installation, participants' heartbeats are recorded as pulses of light and move through a queue of hanging bulbs. *Probiform* shares this interest in making bodily data spatial, collective, and temporal, but replaces a single biometric measurement with an uncertain combination of non-visual sensor readings. Its accumulated forms therefore register not only presence, but also the machine's confidence, gaps, and misinterpretations.
 
-The project is informed particularly by:
-
-- Vilém Flusser, [*Towards a Philosophy of Photography*](https://reaktionbooks.co.uk/work/towards-a-philosophy-of-photography), Reaktion Books, 2000.
-- Vilém Flusser, [*Into the Universe of Technical Images*](https://www.upress.umn.edu/9780816670215/into-the-universe-of-technical-images/), University of Minnesota Press, 2011; first published in German in 1985.
-- Nick Couldry and Ulises A. Mejias, [*The Costs of Connection: How Data Is Colonizing Human Life and Appropriating It for Capitalism*](https://www.sup.org/books/title/?id=28816), Stanford University Press, 2019.
-- N. Katherine Hayles, [*How We Became Posthuman: Virtual Bodies in Cybernetics, Literature, and Informatics*](https://press.uchicago.edu/ucp/books/book/chicago/H/bo3769963.html), University of Chicago Press, 1999.
-- Rafael Lozano-Hemmer, [*Pulse Room*](https://www.lozano-hemmer.com/artworks/pulse_room.php), 2006, interactive installation with incandescent light bulbs, heart-rate sensors, a computer, and metal sculpture.
-
 ## How It Works
 
 The interaction follows a continuous inference loop:
@@ -329,16 +321,44 @@ Press `T` to enter keyboard test mode, then use `0`–`8`, `[`, `]`, `Q/E`, and 
 
 This project is still in the installation-development stage. Before a public exhibition, recalibrate the sound thresholds, effective ultrasonic range, LD2410 sensitivity, and thermal-printer heating parameters for the venue.
 
+## References
+
+Couldry, N. and Mejias, U.A. (2019) *The Costs of Connection: How Data Is Colonizing Human Life and Appropriating It for Capitalism*. Stanford, CA: Stanford University Press. Available at: [https://www.sup.org/books/sociology/costs-connection](https://www.sup.org/books/sociology/costs-connection) (Accessed: 20 August 2026).
+
+Dourish, P. (2001) *Where the Action Is: The Foundations of Embodied Interaction*. Cambridge, MA: MIT Press. Available at: [https://mitpress.mit.edu/9780262541787/where-the-action-is/](https://mitpress.mit.edu/9780262541787/where-the-action-is/) (Accessed: 14 August 2026).
+
+Flusser, V. (2000) *Towards a Philosophy of Photography*. Translated by A. Mathews. London: Reaktion Books. Available at: [https://reaktionbooks.co.uk/work/towards-a-philosophy-of-photography](https://reaktionbooks.co.uk/work/towards-a-philosophy-of-photography) (Accessed: 24 August 2026).
+
+Flusser, V. (2011) *Into the Universe of Technical Images*. Translated by N.A. Roth. Minneapolis, MN: University of Minnesota Press. Available at: [https://www.upress.umn.edu/9780816670215/into-the-universe-of-technical-images/](https://www.upress.umn.edu/9780816670215/into-the-universe-of-technical-images/) (Accessed: 12 August 2026).
+
+Gitelman, L. (ed.) (2013) *“Raw Data” Is an Oxymoron*. Cambridge, MA: MIT Press. Available at: [https://mitpress.mit.edu/9780262518284/raw-data-is-an-oxymoron/](https://mitpress.mit.edu/9780262518284/raw-data-is-an-oxymoron/) (Accessed: 30 August 2026).
+
+Hansen, M.B.N. (2006) *Bodies in Code: Interfaces with Digital Media*. New York: Routledge. Available at: [https://www.routledge.com/Bodies-in-Code-Interfaces-with-Digital-Media/Hansen/p/book/9780415970167](https://www.routledge.com/Bodies-in-Code-Interfaces-with-Digital-Media/Hansen/p/book/9780415970167) (Accessed: 30 August 2026).
+
+Hansen, M.B.N. (2015) *Feed-Forward: On the Future of Twenty-First-Century Media*. Chicago, IL: University of Chicago Press. Available at: [https://press.uchicago.edu/ucp/books/book/chicago/F/bo19211873.html](https://press.uchicago.edu/ucp/books/book/chicago/F/bo19211873.html) (Accessed: 1 August 2026).
+
+Hayles, N.K. (1999) *How We Became Posthuman: Virtual Bodies in Cybernetics, Literature, and Informatics*. Chicago, IL: University of Chicago Press. Available at: [https://press.uchicago.edu/ucp/books/book/chicago/H/bo3769963.html](https://press.uchicago.edu/ucp/books/book/chicago/H/bo3769963.html) (Accessed: 24 August 2026).
+
+Lozano-Hemmer, R. (2006) *Pulse Room* [Interactive installation]. Incandescent light bulbs, heart-rate sensors, computer and metal sculpture. Available at: [https://www.lozano-hemmer.com/artworks/pulse_room.php](https://www.lozano-hemmer.com/artworks/pulse_room.php) (Accessed: 24 August 2026).
+
+Lozano-Hemmer, R. (2008) *Pulse Park* [Interactive installation]. New York: Madison Square Park. Available at: [https://www.lozano-hemmer.com/pulse_park.php](https://www.lozano-hemmer.com/pulse_park.php) (Accessed: 24 August 2026).
+
+Manovich, L. (2001) *The Language of New Media*. Cambridge, MA: MIT Press. Available at: [https://mitpress.mit.edu/9780262296915/the-language-of-new-media/](https://mitpress.mit.edu/9780262296915/the-language-of-new-media/) (Accessed: 24 August 2026).
+
+Parisi, L. (2013) *Contagious Architecture: Computation, Aesthetics, and Space*. Cambridge, MA: MIT Press. Available at: [https://mitpress.mit.edu/9780262529341/contagious-architecture](https://mitpress.mit.edu/9780262529341/contagious-architecture) (Accessed: 30 August 2026).
+
+Whitelaw, M. (2004) *Metacreation: Art and Artificial Life*. Cambridge, MA: MIT Press. Available at: [https://mitpress.mit.edu/9780262731768/metacreation](https://mitpress.mit.edu/9780262731768/metacreation) (Accessed: 24 August 2026).
+
 ## Generative AI Acknowledgement
 
-I acknowledge the use of [1] ChatGPT ([https://chat.openai.com/](https://chat.openai.com/)) to [2] assist with selected aspects of code development and debugging, provide suggestions on specific technical issues, and support language editing during the development of this assessment. I entered prompts including the following between **6 July and 2 August 2026**:
+I acknowledge the use of ChatGPT ([https://chat.openai.com/](https://chat.openai.com/)) to assist with selected aspects of code development and debugging, provide suggestions on specific technical issues, and support language editing during the development of this assessment. I entered prompts including the following between **6 July and 2 August 2026**:
 
-- [3] **Assist with developing and debugging selected functions in the Processing interface, particularly responsive layout behaviour, while retaining the existing Windows 95-inspired visual direction and interaction logic.**  
+- **Assist with developing and debugging selected functions in the Processing interface, particularly responsive layout behaviour, while retaining the existing Windows 95-inspired visual direction and interaction logic.**  
 
-- [3] **Assist with connecting the Arduino Mega 2560 to the Processing program and debugging USB serial communication for ultrasonic, sound, heart-rate/touch, and LD2410 radar data, including port selection, baud-rate configuration, data formatting, and parsing.**  
+- **Assist with connecting the Arduino Mega 2560 to the Processing program and debugging USB serial communication for ultrasonic, sound, heart-rate/touch, and LD2410 radar data, including port selection, baud-rate configuration, data formatting, and parsing.**  
 
-- [3] **Suggest an implementation approach for replacing the previous thermal-printing output with a locally generated QR-code archive, including automatic generation and manual display controls.**  
+- **Suggest an implementation approach for replacing the previous thermal-printing output with a locally generated QR-code archive, including automatic generation and manual display controls.**  
 
-- [3] **Help improve the clarity and bilingual wording of selected sections of the project documentation without changing their technical meaning.**  
+- **Help improve the clarity and bilingual wording of selected sections of the project documentation without changing their technical meaning.**  
 
-[4] The outputs were treated as suggestions rather than final material. Relevant suggestions were evaluated, adapted, and tested by the author before use. The project's concept, research direction, interaction design, visual and sound decisions, hardware implementation, and final presentation were developed and determined by the author. The author accepts responsibility for the accuracy, integrity, and final outcome of the submitted work.
+The outputs were treated as suggestions rather than final material. Relevant suggestions were evaluated, adapted, and tested by the author before use. The project's concept, research direction, interaction design, visual and sound decisions, hardware implementation, and final presentation were developed and determined by the author. The author accepts responsibility for the accuracy, integrity, and final outcome of the submitted work.
